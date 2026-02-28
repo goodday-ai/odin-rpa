@@ -70,12 +70,18 @@ jobs:
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
+
           # ✅ 若未指定 ODIN_YEAR，預設抓「台北時區今年整年」
+          # 注意：寫入 $GITHUB_ENV 只會影響「後續 step」，
+          # 同一步要立刻生效需要 export。
           if [ -z "${ODIN_YEAR:-}" ]; then
             CURRENT_YEAR=$(TZ=Asia/Taipei date +%Y)
-            echo "Use full-year mode: ODIN_YEAR=${CURRENT_YEAR}"
-            echo "ODIN_YEAR=${CURRENT_YEAR}" >> $GITHUB_ENV
+            ODIN_YEAR="${CURRENT_YEAR}"
+            export ODIN_YEAR
+            echo "Use full-year mode: ODIN_YEAR=${ODIN_YEAR}"
+            echo "ODIN_YEAR=${ODIN_YEAR}" >> $GITHUB_ENV
           else
+            export ODIN_YEAR
             echo "Use ODIN_YEAR from env/secrets: ${ODIN_YEAR}"
           fi
 
@@ -86,10 +92,14 @@ jobs:
             case "${{ github.event.schedule }}" in
               "0 22 * * *")
                 echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync"
+                ODIN_CHANGED_ONLY=0
+                export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=0" >> $GITHUB_ENV
                 ;;
               *)
                 echo "Mode: INCREMENTAL (00:00/12:00 Asia/Taipei) → changed-only"
+                ODIN_CHANGED_ONLY=1
+                export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=1" >> $GITHUB_ENV
                 ;;
             esac
