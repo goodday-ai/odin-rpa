@@ -6,25 +6,27 @@ const fs = require("fs");
 const { format, addDays, parseISO } = require("date-fns");
 
 /**
- * ✅ 功能：
+ * ✅ 功能（多館別輪巡版）：
  * - Playwright 登入 Owlting 後台 → 捕捉 Bearer
  * - 方法二：用 Bearer 列出帳號可管理的所有管別（hotelId / 名稱）
- * - 再用指定 hotelId 打 calendar_list → 產出 sheet-ready JSON
+ * - 支援 ODIN_HOTEL_IDS=5720,6323,... 逐館輪巡
+ * - 逐館打 calendar_list → 產出 sheet-ready JSON（每館獨立輸出檔）
  *
- * ✅ 重要輸出：
- * - odin_me_raw.json
- * - odin_hotels_list_raw.json（若 /hotels 可用）
- * - odin_hotels_candidates.json（整理後）
- * - orders_calendar_list_raw.json
- * - orders_sheet_ready.json
- * - orders_sheet_ready_changed.json（ODIN_CHANGED_ONLY=1）
- * - orders_last_snapshot.json（ODIN_SNAPSHOT_PATH）
+ * ✅ 重要輸出（全部放在 out/）：
+ * - out/odin_me_raw.json
+ * - out/odin_hotels_list_raw.json
+ * - out/odin_hotels_candidates.json
+ * - out/orders_calendar_list_raw_<hotelId>.json
+ * - out/orders_sheet_ready_<hotelId>.json
+ * - out/orders_sheet_ready_changed_<hotelId>.json（ODIN_CHANGED_ONLY=1）
+ * - out/orders_last_snapshot_<hotelId>.json（每館獨立）
+ * - out/diag_no_bearer.png（若 Bearer 抓不到）
  */
 
-test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page }) => {
+test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", async ({ page }) => {
   const email = process.env.ODIN_EMAIL || "";
   const password = process.env.ODIN_PASSWORD || "";
-  if (!email || !password) throw new Error("Missing ODIN_EMAIL or ODIN_PASSWORD in .env");
+  if (!email || !password) throw new Error("Missing ODIN_EMAIL or ODIN_PASSWORD");
 
   // ======================
   // ✅ 0) 參數治理
@@ -39,7 +41,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
     return dtf.format(new Date());
   }
 
-  const hotelIdEnv = (process.env.ODIN_HOTEL_ID || "").trim(); // 允許先空著，用「列出管別」模式取得
+  const outDir = (process.env.ODIN_OUT_DIR || "out").trim() || "out";
+  fs.mkdirSync(outDir, { recursive: true });
+
   const startDate = process.env.ODIN_START_DATE || taipeiTodayYMD();
   const daysRaw = Number(process.env.ODIN_DAYS || "90");
   const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
@@ -54,7 +58,38 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
     .filter(Boolean);
 
   const changedOnly = String(process.env.ODIN_CHANGED_ONLY || "0") === "1";
-  const snapshotPath = process.env.ODIN_SNAPSHOT_PATH || "orders_last_snapshot.json";
+
+  const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
+  const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
+
+  // 多館別：優先 ODIN_HOTEL_IDS（逗號清單），否則退回 ODIN_HOTEL_ID
+  const hotelIdsRaw = String(process.env.ODIN_HOTEL_IDS || "").trim();
+  const hotelIdEnv = String(process.env.ODIN_HOTEL_ID || "").trim();
+
+  const hotelIds = hotelIdsRaw
+    ? hotelIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : hotelIdEnv
+      ? [hotelIdEnv]
+      : [];
+
+  // Snapshot 檔名：允許使用者指定模板
+  // - 若 ODIN_SNAPSHOT_PATH 含 {hotelId} → 直接替換
+  // - 若沒含且為多館別 → 自動在檔名插入 _<hotelId>
+  const snapshotPathEnv = String(process.env.ODIN_SNAPSHOT_PATH || "").trim();
+
+  function snapshotPathFor(hotelId) {
+    if (snapshotPathEnv) {
+      if (snapshotPathEnv.includes("{hotelId}")) return snapshotPathEnv.replace(/\{hotelId\}/g, String(hotelId));
+      if (hotelIds.length > 1) {
+        const m = snapshotPathEnv.match(/^(.*?)(\.[^.]+)?$/);
+        const base = m ? m[1] : snapshotPathEnv;
+        const ext = m && m[2] ? m[2] : ".json";
+        return `${base}_${hotelId}${ext}`;
+      }
+      return snapshotPathEnv;
+    }
+    return `${outDir}/orders_last_snapshot_${hotelId}.json`;
+  }
   // ======================
 
   const loginUrl =
@@ -101,9 +136,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
   if (!bearer) {
     const probeUrl = `https://www.owlting.com/booking/v2/admin/me?lang=${encodeURIComponent(lang)}&_=${Date.now()}`;
     await page.evaluate(async (u) => {
-      try {
-        await fetch(u, { method: "GET", credentials: "include" });
-      } catch (_) {}
+      try { await fetch(u, { method: "GET", credentials: "include" }); } catch (_) {}
     }, probeUrl);
 
     for (let i = 0; i < 40; i++) {
@@ -113,8 +146,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
   }
 
   if (!bearer) {
-    await page.screenshot({ path: "diag_no_bearer.png", fullPage: true });
-    throw new Error("Bearer token not captured. See diag_no_bearer.png");
+    await page.screenshot({ path: `${outDir}/diag_no_bearer.png`, fullPage: true });
+    throw new Error(`Bearer token not captured. See ${outDir}/diag_no_bearer.png`);
   }
 
   console.log("✅ bearer captured:", bearer.slice(0, 14) + "***" + bearer.slice(-8));
@@ -127,7 +160,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
   };
 
   fs.writeFileSync(
-    "diag_bearer_seen.json",
+    `${outDir}/diag_bearer_seen.json`,
     JSON.stringify({ ok: true, bearerMasked: bearer.slice(0, 14) + "***" + bearer.slice(-8) }, null, 2),
     "utf8"
   );
@@ -144,11 +177,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
     const name = obj.name != null ? String(obj.name) : obj.hotel_name != null ? String(obj.hotel_name) : "";
     const code = obj.code != null ? String(obj.code) : obj.hotel_code != null ? String(obj.hotel_code) : "";
 
-    const item = {
-      id,
-      name,
-      code
-    };
+    const item = { id, name, code };
 
     const exists = out.find((x) => x && x.id === id);
     if (!exists) out.push(item);
@@ -168,16 +197,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
   async function discoverHotels() {
     const candidates = [];
 
-    // (A) /me：很多系統會在這裡帶 permissions / hotels / accessible_hotels
     const meUrl = `https://www.owlting.com/booking/v2/admin/me?lang=${encodeURIComponent(lang)}&_=${Date.now()}`;
     const meRes = await fetchJsonSafe(meUrl, baseHeaders);
-    fs.writeFileSync("odin_me_raw.json", JSON.stringify(meRes, null, 2), "utf8");
+    fs.writeFileSync(`${outDir}/odin_me_raw.json`, JSON.stringify(meRes, null, 2), "utf8");
 
     try {
       const body = meRes && meRes.json ? meRes.json : {};
       const pool = [];
 
-      // 嘗試常見 key
       if (Array.isArray(body.hotels)) pool.push(...body.hotels);
       if (Array.isArray(body.data && body.data.hotels)) pool.push(...body.data.hotels);
       if (Array.isArray(body.hotel_permissions)) pool.push(...body.hotel_permissions);
@@ -187,15 +214,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
 
       for (const it of pool) {
         pushCandidate(candidates, it);
-        // 有些 permission 物件會包一層 hotel
         if (it && it.hotel) pushCandidate(candidates, it.hotel);
       }
     } catch (_) {}
 
-    // (B) /hotels：如果後台有提供，這是最乾淨的清單
     const hotelsUrl = `https://www.owlting.com/booking/v2/admin/hotels?lang=${encodeURIComponent(lang)}&_=${Date.now()}`;
     const hotelsRes = await fetchJsonSafe(hotelsUrl, baseHeaders);
-    fs.writeFileSync("odin_hotels_list_raw.json", JSON.stringify(hotelsRes, null, 2), "utf8");
+    fs.writeFileSync(`${outDir}/odin_hotels_list_raw.json`, JSON.stringify(hotelsRes, null, 2), "utf8");
 
     try {
       const body = hotelsRes && hotelsRes.json ? hotelsRes.json : {};
@@ -208,75 +233,33 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
       for (const it of pool) pushCandidate(candidates, it);
     } catch (_) {}
 
-    // 排序：id 升冪，方便看
     candidates.sort((a, b) => Number(a.id) - Number(b.id));
 
-    fs.writeFileSync("odin_hotels_candidates.json", JSON.stringify({ ok: true, candidates }, null, 2), "utf8");
+    fs.writeFileSync(`${outDir}/odin_hotels_candidates.json`, JSON.stringify({ ok: true, candidates }, null, 2), "utf8");
 
     console.log("✅ hotels candidates:", candidates.length);
-    for (const h of candidates.slice(0, 20)) {
-      console.log(" -", h.id, h.name || "(no name)", h.code ? `(${h.code})` : "");
-    }
-    if (candidates.length > 20) console.log(" ... (more in odin_hotels_candidates.json)");
+    for (const h of candidates.slice(0, 20)) console.log(" -", h.id, h.name || "(no name)", h.code ? `(${h.code})` : "");
+    if (candidates.length > 20) console.log(" ... (more in out/odin_hotels_candidates.json)");
 
     return candidates;
   }
 
   const hotels = await discoverHotels();
+  const hotelNameById = {};
+  for (const h of hotels) hotelNameById[String(h.id)] = String(h.name || "");
 
   if (listHotelsOnly) {
-    // ✅ 只列出管別就結束（給你拿 ODIN_HOTEL_ID 用）
     console.log("✅ ODIN_LIST_HOTELS_ONLY=1, stop here.");
     return;
   }
 
-  // 沒給 hotelId 就不抓訂單（避免誤抓）
-  if (!hotelIdEnv) {
-    console.log("❌ Missing ODIN_HOTEL_ID. Please check odin_hotels_candidates.json to pick one id.");
-    throw new Error("Missing ODIN_HOTEL_ID (run with ODIN_LIST_HOTELS_ONLY=1 to list all ids).");
+  if (!hotelIds.length) {
+    console.log("❌ Missing ODIN_HOTEL_IDS or ODIN_HOTEL_ID. See out/odin_hotels_candidates.json");
+    throw new Error("Missing ODIN_HOTEL_IDS (or ODIN_HOTEL_ID)");
   }
 
-  const hotelId = hotelIdEnv;
-
   // -----------------------------
-  // 4) 打 orders/calendar_list 抓訂單清單
-  // -----------------------------
-  const from = parseISO(startDate);
-  const to = addDays(from, days - 1);
-  const rangeStr = `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
-
-  const listUrl =
-    `https://www.owlting.com/booking/v2/admin/hotels/${encodeURIComponent(hotelId)}/orders/calendar_list` +
-    `?lang=${encodeURIComponent(lang)}` +
-    `&limit=200` +
-    `&page=1` +
-    `&order_by=checkin` +
-    `&during_checkin_date=${encodeURIComponent(rangeStr)}` +
-    `&_=${Date.now()}`;
-
-  const listRes = await page.request.get(listUrl, { headers: baseHeaders });
-  const listStatus = listRes.status();
-  const listJson = await listRes.json().catch(() => ({}));
-
-  fs.writeFileSync(
-    "orders_calendar_list_raw.json",
-    JSON.stringify({ url: listUrl, httpStatus: listStatus, body: listJson }, null, 2),
-    "utf8"
-  );
-
-  if (listStatus !== 200 || !listJson || typeof listJson !== "object") {
-    throw new Error(`calendar_list failed: http=${listStatus}. See orders_calendar_list_raw.json`);
-  }
-
-  if (typeof listJson.status === "number" && listJson.status !== 0) {
-    throw new Error(`calendar_list not ok: body.status=${listJson.status}. See orders_calendar_list_raw.json`);
-  }
-
-  const listData = Array.isArray(listJson.data) ? listJson.data : [];
-  console.log("✅ calendar_list items:", listData.length);
-
-  // -----------------------------
-  // 5) calendar_list → sheet-ready
+  // 4) 共用工具：calendar_list → sheet-ready
   // -----------------------------
   function pick(obj, keys) {
     for (const k of keys) {
@@ -314,45 +297,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
   }
 
   const columns = ["訂單日期", "訂單編號", "入住日期", "退房日期", "姓名", "房型", "專案名稱", "訂單款項", "已收金額", "剩餘尾款", "UUID", "電話"];
-  const rows = [];
 
-  for (const it of listData) {
-    const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
-    if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
-
-    if (excludeCancelled && isCancelledOrder(it)) continue;
-
-    const row = {
-      訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
-      訂單編號: String(orderSerial),
-      入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
-      退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
-      姓名: pick(it, ["customer_name", "guest_name", "name"]),
-      房型: pick(it, ["room_type_name", "roomTypeName", "room_type"]),
-      專案名稱: pick(it, ["plan_name", "project_name", "rate_plan_name"]),
-      訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
-      已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
-      剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
-      UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
-      電話: pick(it, ["phone", "mobile", "tel", "customer_phone"])
-    };
-
-    if (!row.入住日期 || !row.退房日期) continue;
-
-    rows.push(row);
-  }
-
-  fs.writeFileSync(
-    "orders_sheet_ready.json",
-    JSON.stringify({ hotelId, startDate, days, columns, rows }, null, 2),
-    "utf8"
-  );
-
-  console.log("✅ wrote orders_sheet_ready.json, rows =", rows.length);
-
-  // -----------------------------
-  // 6) 增量輸出：只輸出新增/變動（ODIN_CHANGED_ONLY=1）
-  // -----------------------------
   function stableKey(row) {
     return String(row["訂單編號"] || "");
   }
@@ -372,50 +317,133 @@ test("odin capture orders by API (calendar_list -> sheet-ready)", async ({ page 
     return parts.map((x) => String(x || "")).join("|");
   }
 
-  function readSnapshotSafe() {
+  function readSnapshotSafe(p) {
     try {
-      if (!fs.existsSync(snapshotPath)) return {};
-      const j = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+      if (!fs.existsSync(p)) return {};
+      const j = JSON.parse(fs.readFileSync(p, "utf8"));
       return j && typeof j === "object" ? j : {};
     } catch (_) {
       return {};
     }
   }
 
-  function writeSnapshotSafe(mapObj) {
-    try {
-      fs.writeFileSync(snapshotPath, JSON.stringify(mapObj, null, 2), "utf8");
-    } catch (_) {}
+  function writeSnapshotSafe(p, mapObj) {
+    try { fs.writeFileSync(p, JSON.stringify(mapObj, null, 2), "utf8"); } catch (_) {}
   }
 
-  if (changedOnly) {
-    const prev = readSnapshotSafe();
-    const next = {};
-    const out = [];
+  async function runOneHotel(hotelId) {
+    const hotelName = hotelNameById[String(hotelId)] || "";
 
-    for (const r of rows) {
-      const k = stableKey(r);
-      if (!k) continue;
+    const from = parseISO(startDate);
+    const to = addDays(from, days - 1);
+    const rangeStr = `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
 
-      const sig = stableSig(r);
-      next[k] = sig;
+    const listUrl =
+      `https://www.owlting.com/booking/v2/admin/hotels/${encodeURIComponent(hotelId)}/orders/calendar_list` +
+      `?lang=${encodeURIComponent(lang)}` +
+      `&limit=200` +
+      `&page=1` +
+      `&order_by=checkin` +
+      `&during_checkin_date=${encodeURIComponent(rangeStr)}` +
+      `&_=${Date.now()}`;
 
-      if (!prev[k] || prev[k] !== sig) out.push(r);
-    }
-
-    writeSnapshotSafe(next);
+    const listRes = await page.request.get(listUrl, { headers: baseHeaders });
+    const listStatus = listRes.status();
+    const listJson = await listRes.json().catch(() => ({}));
 
     fs.writeFileSync(
-      "orders_sheet_ready_changed.json",
-      JSON.stringify({ hotelId, startDate, days, columns, rows: out }, null, 2),
+      `${outDir}/orders_calendar_list_raw_${hotelId}.json`,
+      JSON.stringify({ url: listUrl, httpStatus: listStatus, body: listJson }, null, 2),
       "utf8"
     );
 
-    console.log("✅ changedOnly=1, changed rows =", out.length);
+    if (listStatus !== 200 || !listJson || typeof listJson !== "object") {
+      throw new Error(`calendar_list failed: hotelId=${hotelId} http=${listStatus}`);
+    }
+    if (typeof listJson.status === "number" && listJson.status !== 0) {
+      throw new Error(`calendar_list not ok: hotelId=${hotelId} body.status=${listJson.status}`);
+    }
+
+    const listData = Array.isArray(listJson.data) ? listJson.data : [];
+    console.log("✅ calendar_list:", hotelId, hotelName ? `(${hotelName})` : "", "items =", listData.length);
+
+    const rows = [];
+
+    for (const it of listData) {
+      const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
+      if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
+
+      if (excludeCancelled && isCancelledOrder(it)) continue;
+
+      const row = {
+        訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
+        訂單編號: String(orderSerial),
+        入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
+        退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
+        姓名: pick(it, ["customer_name", "guest_name", "name"]),
+        房型: pick(it, ["room_type_name", "roomTypeName", "room_type"]),
+        專案名稱: pick(it, ["plan_name", "project_name", "rate_plan_name"]),
+        訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
+        已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
+        剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
+        UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
+        電話: pick(it, ["phone", "mobile", "tel", "customer_phone"])
+      };
+
+      if (!row.入住日期 || !row.退房日期) continue;
+      rows.push(row);
+    }
+
+    fs.writeFileSync(
+      `${outDir}/orders_sheet_ready_${hotelId}.json`,
+      JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows }, null, 2),
+      "utf8"
+    );
+
+    console.log("✅ wrote:", `${outDir}/orders_sheet_ready_${hotelId}.json`, "rows =", rows.length);
+
+    if (changedOnly) {
+      const snapshotPath = snapshotPathFor(hotelId);
+      const prev = readSnapshotSafe(snapshotPath);
+      const next = {};
+      const out = [];
+
+      for (const r of rows) {
+        const k = stableKey(r);
+        if (!k) continue;
+        const sig = stableSig(r);
+        next[k] = sig;
+        if (!prev[k] || prev[k] !== sig) out.push(r);
+      }
+
+      writeSnapshotSafe(snapshotPath, next);
+
+      fs.writeFileSync(
+        `${outDir}/orders_sheet_ready_changed_${hotelId}.json`,
+        JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows: out }, null, 2),
+        "utf8"
+      );
+
+      console.log("✅ changedOnly=1:", hotelId, "changed rows =", out.length, "snapshot =", snapshotPath);
+    }
+
+    if (!rows.length) {
+      console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
+    }
   }
 
-  if (!rows.length) {
-    console.log("⚠️ rows=0：可能是區間內沒訂單，或 ODIN_HOTEL_ID 選錯管別。");
-    console.log("   先看 orders_calendar_list_raw.json 的 body.data 有沒有東西。");
+  // -----------------------------
+  // 5) ✅ 多館別輪巡
+  // -----------------------------
+  console.log("🧭 hotels to run:", hotelIds.join(","));
+  for (let i = 0; i < hotelIds.length; i++) {
+    const hid = hotelIds[i];
+    await runOneHotel(hid);
+
+    if (i < hotelIds.length - 1 && throttleMs > 0) {
+      await page.waitForTimeout(throttleMs);
+    }
   }
+
+  console.log("✅ done:", hotelIds.length, "hotels");
 });
