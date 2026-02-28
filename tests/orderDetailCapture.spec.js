@@ -64,75 +64,75 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
 
   // ✅ 策略一（寫入 Sheet）：GAS Web App
-const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
+  const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
 
-// --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
-function _normalizeUrl_(raw) {
-  let s = String(raw || "").trim();
-  // 去掉前後引號（使用者常貼成 "https://..." 或 'https://...'）
-  s = s.replace(/^"+/, "").replace(/"+$/, "");
-  s = s.replace(/^'+/, "").replace(/'+$/, "");
-  return s;
-}
-
-function _urlDiag_(raw) {
-  const s = String(raw || "");
-  return {
-    len: s.length,
-    trimmedLen: s.trim().length,
-    hasSpace: /\s/.test(s),
-    hasNewline: /[\r\n]/.test(s),
-    head: s.slice(0, 12),
-    tail: s.slice(-12)
-  };
-}
-
-function _assertValidGasUrl_(raw) {
-  const gasUrl = _normalizeUrl_(raw);
-  const diag = _urlDiag_(raw);
-
-  if (!gasUrl) {
-    throw new Error(
-      "Missing ODIN_SHEET_WEBAPP_URL.\n" +
-      "Fix: GitHub Secrets → ODIN_SHEET_WEBAPP_URL 必須是完整 https URL，且結尾為 /exec。\n" +
-      `Diag: ${JSON.stringify(diag)}`
-    );
+  // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
+  function _normalizeUrl_(raw) {
+    let s = String(raw || "").trim();
+    // 去掉前後引號（使用者常貼成 "https://..." 或 'https://...'）
+    s = s.replace(/^"+/, "").replace(/"+$/, "");
+    s = s.replace(/^'+/, "").replace(/'+$/, "");
+    return s;
   }
 
-  let u;
-  try {
-    u = new URL(gasUrl);
-  } catch (_) {
-    throw new Error(
-      "Invalid ODIN_SHEET_WEBAPP_URL (cannot be parsed as URL).\n" +
-      "Fix: 請移除空白/換行/引號，格式應類似 https://script.google.com/macros/s/.../exec\n" +
-      `Diag: ${JSON.stringify(diag)}`
-    );
+  function _urlDiag_(raw) {
+    const s = String(raw || "");
+    return {
+      len: s.length,
+      trimmedLen: s.trim().length,
+      hasSpace: /\s/.test(s),
+      hasNewline: /[\r\n]/.test(s),
+      head: s.slice(0, 12),
+      tail: s.slice(-12)
+    };
   }
 
-  if (u.protocol !== "https:") {
-    throw new Error(
-      "Invalid ODIN_SHEET_WEBAPP_URL (protocol must be https).\n" +
-      `Got: ${u.protocol}\n` +
-      `Diag: ${JSON.stringify(diag)}`
-    );
+  function _assertValidGasUrl_(raw) {
+    const gasUrl = _normalizeUrl_(raw);
+    const diag = _urlDiag_(raw);
+
+    if (!gasUrl) {
+      throw new Error(
+        "Missing ODIN_SHEET_WEBAPP_URL.\n" +
+        "Fix: GitHub Secrets → ODIN_SHEET_WEBAPP_URL 必須是完整 https URL，且結尾為 /exec。\n" +
+        `Diag: ${JSON.stringify(diag)}`
+      );
+    }
+
+    let u;
+    try {
+      u = new URL(gasUrl);
+    } catch (_) {
+      throw new Error(
+        "Invalid ODIN_SHEET_WEBAPP_URL (cannot be parsed as URL).\n" +
+        "Fix: 請移除空白/換行/引號，格式應類似 https://script.google.com/macros/s/.../exec\n" +
+        `Diag: ${JSON.stringify(diag)}`
+      );
+    }
+
+    if (u.protocol !== "https:") {
+      throw new Error(
+        "Invalid ODIN_SHEET_WEBAPP_URL (protocol must be https).\n" +
+        `Got: ${u.protocol}\n` +
+        `Diag: ${JSON.stringify(diag)}`
+      );
+    }
+
+    if (!/\/exec$/.test(u.pathname)) {
+      throw new Error(
+        "Invalid ODIN_SHEET_WEBAPP_URL (must end with /exec).\n" +
+        `Got pathname: ${u.pathname}\n` +
+        `Diag: ${JSON.stringify(diag)}`
+      );
+    }
+
+    return gasUrl;
   }
 
-  if (!/\/exec$/.test(u.pathname)) {
-    throw new Error(
-      "Invalid ODIN_SHEET_WEBAPP_URL (must end with /exec).\n" +
-      `Got pathname: ${u.pathname}\n` +
-      `Diag: ${JSON.stringify(diag)}`
-    );
-  }
-
-  return gasUrl;
-}
-
-// ✅ 注意：這裡先保留 raw，真正要用時再 assert，錯誤才會清楚
-const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
-const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
-const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
+  // ✅ 注意：這裡先保留 raw，真正要用時再 assert，錯誤才會清楚
+  const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
+  const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
+  const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
 
   // 多館別：優先 ODIN_HOTEL_IDS（逗號清單），否則退回 ODIN_HOTEL_ID
   const hotelIdsRaw = String(process.env.ODIN_HOTEL_IDS || "").trim();
@@ -180,8 +180,8 @@ const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
   console.log(
     "🧾 sheet write mode:",
     writeSheet ? "ON" : "OFF",
-"| gasUrl=",
-String(gasUrlRaw || "").trim() ? "set" : "missing",
+    "| gasUrl=",
+    String(gasUrlRaw || "").trim() ? "set" : "missing",
     "| sheetToken=",
     sheetToken ? "set" : "missing",
     "| spreadsheetId=",
@@ -374,21 +374,52 @@ String(gasUrlRaw || "").trim() ? "set" : "missing",
 
   function toAmount(v) {
     if (v == null) return "";
-    const s = String(v).replace(/,/g, "").trim();
-    return s;
+    return String(v).replace(/,/g, "").trim();
   }
 
+  // ✅ 取消單判斷加固（擴大 key + 旗標 + JSON 掃描保險）
   function getStatusText(it) {
-    const v = pick(it, ["status", "order_status", "booking_status", "state", "orderState", "order_state"]);
+    const v = pick(it, [
+      "status",
+      "order_status",
+      "booking_status",
+      "state",
+      "orderState",
+      "order_state",
+      "status_text",
+      "order_status_text",
+      "booking_status_text",
+      "cancel_status",
+      "cancel_reason"
+    ]);
     if (v == null) return "";
     return String(v).trim().toLowerCase();
   }
 
   function isCancelledOrder(it) {
+    // 1) 明確 status 欄位
     const s = getStatusText(it);
-    if (!s) return false;
-    if (cancelStatusSet.includes(s)) return true;
-    if (s.includes("cancel")) return true;
+    if (s) {
+      if (cancelStatusSet.includes(s)) return true;
+      if (s.includes("cancel")) return true;
+      if (s.includes("void")) return true;
+      if (s.includes("invalid")) return true;
+      if (s.includes("取消")) return true;
+      if (s.includes("作廢")) return true;
+    }
+
+    // 2) 明確布林旗標
+    const flag = pick(it, ["is_cancelled", "is_canceled", "cancelled", "canceled", "voided"]);
+    if (flag === true || String(flag).toLowerCase() === "true") return true;
+
+    // 3) 保險：整包掃描（nested 欄位藏太深也能擋）
+    const blob = JSON.stringify(it).toLowerCase();
+    if (blob.includes("cancel")) return true;
+    if (blob.includes("void")) return true;
+    if (blob.includes("invalid")) return true;
+    if (blob.includes("取消")) return true;
+    if (blob.includes("作廢")) return true;
+
     return false;
   }
 
@@ -427,55 +458,55 @@ String(gasUrlRaw || "").trim() ? "set" : "missing",
     try { fs.writeFileSync(p, JSON.stringify(mapObj, null, 2), "utf8"); } catch (_) {}
   }
 
-async function syncToSheetOrThrow(payload, hotelId, hotelName) {
-  if (!writeSheet) return;
+  async function syncToSheetOrThrow(payload, hotelId, hotelName) {
+    if (!writeSheet) return;
 
-  if (!sheetToken) throw new Error("Missing ODIN_SHEET_TOKEN (GitHub Secrets)");
-  if (!spreadsheetId) throw new Error("Missing ODIN_SPREADSHEET_ID (GitHub Secrets)");
+    if (!sheetToken) throw new Error("Missing ODIN_SHEET_TOKEN (GitHub Secrets)");
+    if (!spreadsheetId) throw new Error("Missing ODIN_SPREADSHEET_ID (GitHub Secrets)");
 
-  // ✅ 這裡才做 URL 硬校驗：錯誤會帶 diag（不洩漏內容）
-  const gasUrl = _assertValidGasUrl_(gasUrlRaw);
+    // ✅ 這裡才做 URL 硬校驗：錯誤會帶 diag（不洩漏內容）
+    const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
-  let resp;
-  try {
-    resp = await page.request.post(gasUrl, {
-      data: payload,
-      headers: { "content-type": "application/json" }
-    });
-  } catch (e) {
-    const diag = _urlDiag_(gasUrlRaw);
-    throw new Error(
-      `GAS POST failed (request error): hotelId=${hotelId}\n` +
-      `Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n` +
-      `Diag: ${JSON.stringify(diag)}\n` +
-      `Err: ${String(e && e.message ? e.message : e)}`
-    );
+    let resp;
+    try {
+      resp = await page.request.post(gasUrl, {
+        data: payload,
+        headers: { "content-type": "application/json" }
+      });
+    } catch (e) {
+      const diag = _urlDiag_(gasUrlRaw);
+      throw new Error(
+        `GAS POST failed (request error): hotelId=${hotelId}\n` +
+        "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
+        `Diag: ${JSON.stringify(diag)}\n` +
+        `Err: ${String(e && e.message ? e.message : e)}`
+      );
+    }
+
+    const http = resp.status();
+    const text = await resp.text().catch(() => "");
+
+    let j = null;
+    try { j = JSON.parse(text); } catch (_) {}
+
+    if (http < 200 || http >= 300) {
+      throw new Error(
+        `GAS sync failed: hotelId=${hotelId} http=${http}\n` +
+        "Tip: 去 Apps Script → Executions 看伺服端錯誤\n" +
+        `Body: ${text.slice(0, 800)}`
+      );
+    }
+
+    // ✅ 防止「200 但其實回 HTML / 沒執行 doPost」
+    if (!j || j.ok !== true) {
+      throw new Error(
+        `GAS sync not ok: hotelId=${hotelId} http=${http}\n` +
+        `Body: ${text.slice(0, 800)}`
+      );
+    }
+
+    console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
   }
-
-  const http = resp.status();
-  const text = await resp.text().catch(() => "");
-
-  let j = null;
-  try { j = JSON.parse(text); } catch (_) {}
-
-  if (http < 200 || http >= 300) {
-    throw new Error(
-      `GAS sync failed: hotelId=${hotelId} http=${http}\n` +
-      `Tip: 去 Apps Script → Executions 看伺服端錯誤\n` +
-      `Body: ${text.slice(0, 800)}`
-    );
-  }
-
-  // ✅ 防止「200 但其實回 HTML / 沒執行 doPost」
-  if (!j || j.ok !== true) {
-    throw new Error(
-      `GAS sync not ok: hotelId=${hotelId} http=${http}\n` +
-      `Body: ${text.slice(0, 800)}`
-    );
-  }
-
-  console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
-}
 
   async function runOneHotel(hotelId) {
     const hotelName = hotelNameById[String(hotelId)] || "";
@@ -514,12 +545,16 @@ async function syncToSheetOrThrow(payload, hotelId, hotelName) {
     console.log("✅ calendar_list:", hotelId, hotelName ? `(${hotelName})` : "", "items =", listData.length);
 
     const rows = [];
+    const cancelledSkipped = { count: 0 };
 
     for (const it of listData) {
       const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
       if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
 
-      if (excludeCancelled && isCancelledOrder(it)) continue;
+      if (excludeCancelled && isCancelledOrder(it)) {
+        cancelledSkipped.count++;
+        continue;
+      }
 
       const row = {
         訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
@@ -548,6 +583,7 @@ async function syncToSheetOrThrow(payload, hotelId, hotelName) {
     );
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
+    if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
 
     // ✅ 策略一：每館抓完就寫入 Sheet（就算 rows=0 也會寫入，方便建立表頭/分頁）
     await syncToSheetOrThrow(
