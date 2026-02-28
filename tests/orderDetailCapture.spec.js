@@ -405,23 +405,27 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return String(v).trim().toLowerCase();
   }
 
-  function isCancelledOrder(it) {
-    const s = getStatusText(it);
-    if (s) {
-      if (cancelStatusSet.includes(s)) return true;
-      if (s.includes("cancel")) return true;
-      if (s.includes("void")) return true;
-      if (s.includes("invalid")) return true;
-      if (s.includes("取消")) return true;
-      if (s.includes("作廢")) return true;
-    }
+function isCancelledOrder(it) {
+  // ✅ 0) 最硬指標：只要 canceled_at 有值，就視為取消/作廢
+  // 你這次抓到的漏網（付款失敗 + canceled_at）就是靠這條堵住
+  const canceledAt = pick(it, ["canceled_at", "cancelled_at", "canceledAt", "cancelledAt"]);
+  if (canceledAt) return true;
 
-    const flag = pick(it, ["is_cancelled", "is_canceled", "cancelled", "canceled", "voided", "is_void"]);
-    if (flag === true || String(flag).toLowerCase() === "true") return true;
-
-    return false;
+  const s = getStatusText(it);
+  if (s) {
+    if (cancelStatusSet.includes(s)) return true;
+    if (s.includes("cancel")) return true;
+    if (s.includes("void")) return true;
+    if (s.includes("invalid")) return true;
+    if (s.includes("取消")) return true;
+    if (s.includes("作廢")) return true;
   }
 
+  const flag = pick(it, ["is_cancelled", "is_canceled", "cancelled", "canceled", "voided", "is_void"]);
+  if (flag === true || String(flag).toLowerCase() === "true") return true;
+
+  return false;
+}
   const columns = ["訂單日期", "訂單編號", "入住日期", "退房日期", "姓名", "房型", "專案名稱", "訂單款項", "已收金額", "剩餘尾款", "UUID", "電話"];
 
   function stableKey(row) {
