@@ -47,7 +47,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   const startDate = process.env.ODIN_START_DATE || taipeiTodayYMD();
 const daysRaw = Number(process.env.ODIN_DAYS || "90");
-const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(365, Math.floor(daysRaw))) : 90;
+const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
   const lang = process.env.ODIN_LANG || "zh_tw";
 
   const listHotelsOnly = String(process.env.ODIN_LIST_HOTELS_ONLY || "0") === "1";
