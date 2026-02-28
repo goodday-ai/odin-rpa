@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 15
 
     env:
+      TZ: Asia/Taipei
       ODIN_LANG: zh_tw
       ODIN_OUT_DIR: out
 
@@ -70,12 +71,13 @@ jobs:
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
+          echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
 
           # ✅ 若未指定 ODIN_YEAR，預設抓「台北時區今年整年」
           # 注意：寫入 $GITHUB_ENV 只會影響「後續 step」，
           # 同一步要立刻生效需要 export。
           if [ -z "${ODIN_YEAR:-}" ]; then
-            CURRENT_YEAR=$(TZ=Asia/Taipei date +%Y)
+            CURRENT_YEAR=$(date +%Y)
             ODIN_YEAR="${CURRENT_YEAR}"
             export ODIN_YEAR
             echo "Use full-year mode: ODIN_YEAR=${ODIN_YEAR}"
