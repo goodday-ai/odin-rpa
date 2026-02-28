@@ -26,7 +26,8 @@ jobs:
       ODIN_LANG: zh_tw
       ODIN_OUT_DIR: out
 
-      # ✅ 預設：120 天
+      # ✅ 預設以 ODIN_YEAR 全年度模式抓取（可在手動觸發時覆寫）
+      ODIN_YEAR: ""
       ODIN_DAYS: "120"
 
       # ✅ 取消單過濾（會把取消單交給 GAS 刪除）
@@ -69,6 +70,14 @@ jobs:
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
+          # ✅ 若未指定 ODIN_YEAR，預設抓「台北時區今年整年」
+          if [ -z "${ODIN_YEAR:-}" ]; then
+            CURRENT_YEAR=$(TZ=Asia/Taipei date +%Y)
+            echo "Use full-year mode: ODIN_YEAR=${CURRENT_YEAR}"
+            echo "ODIN_YEAR=${CURRENT_YEAR}" >> $GITHUB_ENV
+          else
+            echo "Use ODIN_YEAR from env/secrets: ${ODIN_YEAR}"
+          fi
 
           # ✅ 依「觸發時段」覆寫策略
           # - 00:00 / 12:00：增量更新（ODIN_CHANGED_ONLY=1）
