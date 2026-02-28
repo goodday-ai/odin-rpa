@@ -401,10 +401,18 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   }
 
   function toSheetDate(v) {
-    const s = String(v || "");
+    const s = String(v || "").trim();
     if (!s) return "";
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.replace(/-/g, "/").slice(0, 10);
-    if (/^\d{4}\/\d{2}\/\d{2}/.test(s)) return s.slice(0, 10);
+
+    // 統一轉成 yyyy/MM/dd，避免同欄位同時出現 - 與 /
+    const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (m) {
+      const y = m[1];
+      const mm = m[2].padStart(2, "0");
+      const dd = m[3].padStart(2, "0");
+      return `${y}/${mm}/${dd}`;
+    }
+
     return s;
   }
 
