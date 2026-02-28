@@ -8,9 +8,10 @@ const { format, addDays, parseISO, isValid } = require("date-fns");
 /**
  * ✅ 功能（多館別輪巡版）：
  * - Playwright 登入 Owlting 後台 → 捕捉 Bearer
- * - 方法二：用 Bearer 列出帳號可管理的所有管別（hotelId / 名稱）
+ * - 方法二：用 Bearer 列出帳號可管理的管別（hotelId / 名稱）
  * - 支援 ODIN_HOTEL_IDS=5720,6323,... 逐館輪巡
- * - 逐館打 calendar_list → 產出 sheet-ready JSON（每館獨立輸出檔）
+ * - 逐館打 calendar_list（自動翻頁）→ 產出 sheet-ready JSON（每館獨立輸出檔）
+ * - ✅ 可選：只抓特定「訂單狀態」（例如已成立 Successful）
  * - ✅ 策略一：每館產出後立即 POST 到 GAS Web App → 寫入 Google Sheet
  *    - 依入住年份建分頁、訂單編號 upsert、取消單刪除、同步後排序
  *
@@ -18,12 +19,12 @@ const { format, addDays, parseISO, isValid } = require("date-fns");
  * - out/odin_me_raw.json
  * - out/odin_hotels_list_raw.json
  * - out/odin_hotels_candidates.json
- * - out/orders_calendar_list_raw_<hotelId>.json
+ * - out/orders_calendar_list_raw_<hotelId>.json（含 pagesFetched / totalPages）
  * - out/orders_sheet_ready_<hotelId>.json
  * - out/orders_sheet_ready_changed_<hotelId>.json（ODIN_CHANGED_ONLY=1 時送出的 rows）
  * - out/orders_last_snapshot_<hotelId>.json（每館獨立）
  * - out/diag_no_bearer.png（若 Bearer 抓不到）
- * - ✅ out/diag_filter_<hotelId>.json（漏斗診斷：為什麼 rows 變 0）
+ * - out/diag_filter_<hotelId>.json（漏斗診斷）
  */
 
 test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", async ({ page }) => {
@@ -50,17 +51,35 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return v;
   }
 
+  function isYearString(s) {
+    return /^\d{4}$/.test(String(s || "").trim());
+  }
+
+  function yearRange(yearStr) {
+    const y = String(yearStr).trim();
+    return { from: `${y}-01-01`, to: `${y}-12-31` };
+  }
+
   const outDir = (process.env.ODIN_OUT_DIR || "out").trim() || "out";
   fs.mkdirSync(outDir, { recursive: true });
 
+  // ✅ 年度模式：ODIN_YEAR 優先
+  const yearRaw = String(process.env.ODIN_YEAR || "").trim();
+  const useYearMode = isYearString(yearRaw);
+
+  // rolling 模式仍保留（你不用 ODIN_YEAR 時會走這個）
   const startDate = String(process.env.ODIN_START_DATE || taipeiTodayYMD()).trim() || taipeiTodayYMD();
   const startDateISO = parseISO(startDate);
-  if (!isValid(startDateISO)) throw new Error(`Invalid ODIN_START_DATE: ${startDate} (expect YYYY-MM-DD)`);
+  if (!useYearMode && !isValid(startDateISO)) throw new Error(`Invalid ODIN_START_DATE: ${startDate} (expect YYYY-MM-DD)`);
 
-  const days = clampInt(process.env.ODIN_DAYS || "120", 1, 180, 120);
+  const days = clampInt(process.env.ODIN_DAYS || "120", 1, 370, 120);
   const lang = process.env.ODIN_LANG || "zh_tw";
 
   const listHotelsOnly = String(process.env.ODIN_LIST_HOTELS_ONLY || "0") === "1";
+
+  // ✅ 若你用「已成立」狀態抓，取消單通常就會少很多
+  //   - 你可在 ODIN_ORDER_STATUS 放 successful（或你實測的值）
+  const orderStatus = String(process.env.ODIN_ORDER_STATUS || "").trim();
 
   const excludeCancelled = String(process.env.ODIN_EXCLUDE_CANCELLED || "0") === "1";
   const cancelStatusSet = String(process.env.ODIN_CANCEL_STATUS || "cancelled,canceled,void,invalid")
@@ -185,10 +204,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     sheetToken ? "set" : "missing",
     "| spreadsheetId=",
     spreadsheetId ? "set" : "missing",
-    "| days=",
-    String(days),
+    "| mode=",
+    useYearMode ? `YEAR(${yearRaw})` : "ROLLING",
     "| startDate=",
     startDate,
+    "| days=",
+    String(days),
+    "| order_status=",
+    orderStatus ? orderStatus : "(none)",
     "| changedOnly=",
     changedOnly ? "1" : "0"
   );
@@ -211,6 +234,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   await expect(page).toHaveURL(/owlting\.com\/booking\/admin/i);
 
+  // -----------------------------
+  // 2) 捕捉 Bearer token
+  // -----------------------------
   let bearer = "";
 
   page.on("request", (req) => {
@@ -260,6 +286,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "utf8"
   );
 
+  // -----------------------------
+  // 3) 列出可管理管別
+  // -----------------------------
   function pushCandidate(out, obj) {
     if (!obj || typeof obj !== "object") return;
 
@@ -350,6 +379,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     throw new Error("Missing ODIN_HOTEL_IDS (or ODIN_HOTEL_ID)");
   }
 
+  // -----------------------------
+  // 4) calendar_list → sheet-ready
+  // -----------------------------
   function pick(obj, keys) {
     for (const k of keys) {
       if (obj && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) return obj[k];
@@ -449,10 +481,21 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
-    const resp = await page.request.post(gasUrl, {
-      data: payload,
-      headers: { "content-type": "application/json" }
-    });
+    let resp;
+    try {
+      resp = await page.request.post(gasUrl, {
+        data: payload,
+        headers: { "content-type": "application/json" }
+      });
+    } catch (e) {
+      const diag = _urlDiag_(gasUrlRaw);
+      throw new Error(
+        `GAS POST failed (request error): hotelId=${hotelId}\n` +
+        "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
+        `Diag: ${JSON.stringify(diag)}\n` +
+        `Err: ${String(e && e.message ? e.message : e)}`
+      );
+    }
 
     const http = resp.status();
     const text = await resp.text().catch(() => "");
@@ -478,46 +521,102 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
   }
 
-  async function runOneHotel(hotelId) {
-    const hotelName = hotelNameById[String(hotelId)] || "";
+  function buildRangeStr() {
+    if (useYearMode) {
+      const r = yearRange(yearRaw);
+      return `${r.from},${r.to}`;
+    }
 
     const from = startDateISO;
     const to = addDays(from, days - 1);
-    const rangeStr = `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
+    return `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
+  }
 
-    const listUrl =
+  function buildListUrl(hotelId, pageNo, rangeStr) {
+    const base =
       `https://www.owlting.com/booking/v2/admin/hotels/${encodeURIComponent(hotelId)}/orders/calendar_list` +
       `?lang=${encodeURIComponent(lang)}` +
       `&limit=200` +
-      `&page=1` +
+      `&page=${encodeURIComponent(String(pageNo))}` +
       `&order_by=checkin` +
-      `&during_checkin_date=${encodeURIComponent(rangeStr)}` +
-      `&_=${Date.now()}`;
+      `&during_checkin_date=${encodeURIComponent(rangeStr)}`;
 
-    const listRes = await page.request.get(listUrl, { headers: baseHeaders });
-    const listStatus = listRes.status();
-    const listJson = await listRes.json().catch(() => ({}));
+    const withStatus = orderStatus ? `${base}&order_status=${encodeURIComponent(orderStatus)}` : base;
+    return `${withStatus}&_=${Date.now()}`;
+  }
+
+  async function runOneHotel(hotelId) {
+    const hotelName = hotelNameById[String(hotelId)] || "";
+    const rangeStr = buildRangeStr();
+
+    // ✅ 自動翻頁：把 total_pages 全抓完
+    let pageNo = 1;
+    let totalPages = 1;
+    const allData = [];
+    const pagesMeta = [];
+
+    while (pageNo <= totalPages) {
+      const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
+
+      const listRes = await page.request.get(listUrl, { headers: baseHeaders });
+      const listStatus = listRes.status();
+      const listJson = await listRes.json().catch(() => ({}));
+
+      if (listStatus !== 200 || !listJson || typeof listJson !== "object") {
+        throw new Error(`calendar_list failed: hotelId=${hotelId} http=${listStatus} page=${pageNo}`);
+      }
+      if (typeof listJson.status === "number" && listJson.status !== 0) {
+        throw new Error(`calendar_list not ok: hotelId=${hotelId} body.status=${listJson.status} page=${pageNo}`);
+      }
+
+      const pageData = Array.isArray(listJson.data) ? listJson.data : [];
+      const pagination = listJson.pagination && typeof listJson.pagination === "object" ? listJson.pagination : {};
+      const tp = Number(pagination.total_pages || 1);
+
+      if (Number.isFinite(tp) && tp >= 1) totalPages = tp;
+
+      allData.push(...pageData);
+      pagesMeta.push({
+        page: pageNo,
+        items: pageData.length,
+        total_pages: totalPages
+      });
+
+      console.log("📄 calendar_list page:", hotelId, hotelName ? `(${hotelName})` : "", `page=${pageNo}/${totalPages}`, `items=${pageData.length}`);
+
+      pageNo++;
+
+      // 小油門：避免連打太急（你也能用 ODIN_THROTTLE_MS 控）
+      if (throttleMs > 0) await page.waitForTimeout(Math.min(throttleMs, 800));
+    }
 
     fs.writeFileSync(
       `${outDir}/orders_calendar_list_raw_${hotelId}.json`,
-      JSON.stringify({ url: listUrl, httpStatus: listStatus, body: listJson }, null, 2),
+      JSON.stringify(
+        {
+          hotelId,
+          hotelName,
+          mode: useYearMode ? `YEAR(${yearRaw})` : "ROLLING",
+          rangeStr,
+          orderStatus: orderStatus ? orderStatus : "",
+          pagesFetched: pagesMeta.length,
+          totalPages,
+          pagesMeta,
+          totalItems: allData.length,
+          body: { status: 0, data: allData }
+        },
+        null,
+        2
+      ),
       "utf8"
     );
 
-    if (listStatus !== 200 || !listJson || typeof listJson !== "object") {
-      throw new Error(`calendar_list failed: hotelId=${hotelId} http=${listStatus}`);
-    }
-    if (typeof listJson.status === "number" && listJson.status !== 0) {
-      throw new Error(`calendar_list not ok: hotelId=${hotelId} body.status=${listJson.status}`);
-    }
-
-    const listData = Array.isArray(listJson.data) ? listJson.data : [];
-    console.log("✅ calendar_list:", hotelId, hotelName ? `(${hotelName})` : "", "items =", listData.length);
+    console.log("✅ calendar_list done:", hotelId, hotelName ? `(${hotelName})` : "", "totalItems =", allData.length);
 
     const diag = {
       hotelId: String(hotelId),
       hotelName,
-      totalItems: listData.length,
+      totalItems: allData.length,
       keptRows: 0,
       cancelledOrderNos: 0,
       drop: {
@@ -536,7 +635,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     const rows = [];
     const cancelledSet = {};
 
-    for (const it of listData) {
+    for (const it of allData) {
       const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
 
       if (!diag.samples.firstSerial && orderSerial) diag.samples.firstSerial = String(orderSerial);
@@ -601,11 +700,27 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
     fs.writeFileSync(
       sheetReadyPath,
-      JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows, cancelledOrderNos }, null, 2),
+      JSON.stringify(
+        {
+          hotelId,
+          hotelName,
+          mode: useYearMode ? `YEAR(${yearRaw})` : "ROLLING",
+          rangeStr,
+          startDate,
+          days,
+          orderStatus: orderStatus ? orderStatus : "",
+          columns,
+          rows,
+          cancelledOrderNos
+        },
+        null,
+        2
+      ),
       "utf8"
     );
 
     let rowsToSend = rows;
+
     if (changedOnly) {
       const snapshotPath = snapshotPathFor(hotelId);
       const prev = readSnapshotSafe(snapshotPath);
@@ -625,12 +740,11 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       const changedPath = `${outDir}/orders_sheet_ready_changed_${hotelId}.json`;
       fs.writeFileSync(
         changedPath,
-        JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows: changedRows, cancelledOrderNos }, null, 2),
+        JSON.stringify({ hotelId, hotelName, columns, rows: changedRows, cancelledOrderNos }, null, 2),
         "utf8"
       );
 
       rowsToSend = changedRows;
-
       console.log("✅ changedOnly=1:", hotelId, "changed rows =", changedRows.length, "snapshot =", snapshotPath);
     }
 
@@ -644,7 +758,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         days,
         columns,
         rows: rowsToSend,
-        cancelledOrderNos
+        cancelledOrderNos,
+        mode: useYearMode ? `YEAR(${yearRaw})` : "ROLLING",
+        rangeStr,
+        orderStatus: orderStatus ? orderStatus : ""
       },
       hotelId,
       hotelName
@@ -655,6 +772,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     }
   }
 
+  // -----------------------------
+  // 5) 多館別輪巡
+  // -----------------------------
   console.log("🧭 hotels to run:", hotelIds.join(","));
   for (let i = 0; i < hotelIds.length; i++) {
     const hid = hotelIds[i];
