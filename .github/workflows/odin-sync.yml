@@ -3,55 +3,45 @@ name: Odin Sync (Playwright)
 on:
   workflow_dispatch:
   schedule:
-    # ✅ 每天 Asia/Taipei 03:00 = UTC 19:00（固定）
-    - cron: "0 19 * * *"
+    # ✅ Asia/Taipei 00:00 = UTC 16:00（前一天）
+    - cron: "0 16 * * *"
+    # ✅ Asia/Taipei 06:00 = UTC 22:00（前一天）→ 校正（全量）
+    - cron: "0 22 * * *"
+    # ✅ Asia/Taipei 12:00 = UTC 04:00
+    - cron: "0 4 * * *"
 
-# ✅ 避免同一時間重複執行（手動 + 排程撞在一起時很好用）
 concurrency:
   group: odin-sync
   cancel-in-progress: true
 
-# ✅ 最小權限（本流程只需要 checkout 讀 repo）
 permissions:
   contents: read
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     env:
-      # =========================
-      # ✅ 基本參數（必要時你再改）
-      # =========================
       ODIN_LANG: zh_tw
-      ODIN_DAYS: "90"
-      ODIN_OUT_DIR: "out"
+      ODIN_OUT_DIR: out
 
-      # 不填就由程式用 Asia/Taipei 今日（建議保留空白，讓它每天自動變）
-      # ODIN_START_DATE: "2026-02-27"
+      # ✅ 預設：120 天
+      ODIN_DAYS: "120"
 
-      # =========================
-      # ✅ 取消單過濾
-      # =========================
+      # ✅ 取消單過濾（會把取消單交給 GAS 刪除）
       ODIN_EXCLUDE_CANCELLED: "1"
       ODIN_CANCEL_STATUS: "cancelled,canceled,void,invalid"
 
-      # =========================
       # ✅ 多館別輪巡節流（毫秒）
-      # =========================
       ODIN_THROTTLE_MS: "250"
 
-      # =========================
-      # ✅ 增量（先關掉；等你要用 snapshot 再開）
-      # =========================
-      ODIN_CHANGED_ONLY: "0"
-      # ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
-
-      # =========================
       # ✅ 策略一：抓完直接寫入 Google Sheet（GAS）
-      # =========================
       ODIN_WRITE_SHEET: "1"
+
+      # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
+      ODIN_CHANGED_ONLY: "1"
+      ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
 
     steps:
       - name: Checkout
@@ -71,18 +61,33 @@ jobs:
 
       - name: Run Odin sync
         env:
-          # ✅ Owlting 登入
           ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
-
-          # ✅ 多館別（逗號清單）
           ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
-
-          # ✅ GAS Web App（策略一）
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
         run: |
+          echo "Event schedule: '${{ github.event.schedule }}'"
+
+          # ✅ 依「觸發時段」覆寫策略
+          # - 00:00 / 12:00：增量更新（ODIN_CHANGED_ONLY=1）
+          # - 06:00：校正（全量），把 snapshot 重新對齊，順便清掉歷史取消單殘留
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            case "${{ github.event.schedule }}" in
+              "0 22 * * *")
+                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync"
+                echo "ODIN_CHANGED_ONLY=0" >> $GITHUB_ENV
+                ;;
+              *)
+                echo "Mode: INCREMENTAL (00:00/12:00 Asia/Taipei) → changed-only"
+                echo "ODIN_CHANGED_ONLY=1" >> $GITHUB_ENV
+                ;;
+            esac
+          else
+            echo "Mode: MANUAL → keep repo defaults"
+          fi
+
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
       - name: Upload artifacts
