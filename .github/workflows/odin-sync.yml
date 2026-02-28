@@ -27,6 +27,9 @@ jobs:
       # ✅ 增量（先關掉；等你要用 snapshot 再開）
       ODIN_CHANGED_ONLY: "0"
 
+      # ✅ 策略一：抓完直接寫入 Google Sheet（GAS）
+      ODIN_WRITE_SHEET: "1"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,6 +51,11 @@ jobs:
           ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
           ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
+
+          # ✅ GAS Web App（策略一）
+          ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
+          ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
+          ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
         run: |
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
