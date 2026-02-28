@@ -11,6 +11,7 @@ const { format, addDays, parseISO } = require("date-fns");
  * - 方法二：用 Bearer 列出帳號可管理的所有管別（hotelId / 名稱）
  * - 支援 ODIN_HOTEL_IDS=5720,6323,... 逐館輪巡
  * - 逐館打 calendar_list → 產出 sheet-ready JSON（每館獨立輸出檔）
+ * - ✅ 策略一：每館產出後立即 POST 到 GAS Web App → 寫入 Google Sheet（依入住年份建分頁、訂單編號 upsert）
  *
  * ✅ 重要輸出（全部放在 out/）：
  * - out/odin_me_raw.json
@@ -62,6 +63,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
 
+  // ✅ 策略一（寫入 Sheet）：GAS Web App
+  const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
+  const gasUrl = String(process.env.ODIN_SHEET_WEBAPP_URL || "").trim();
+  const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
+  const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
+
   // 多館別：優先 ODIN_HOTEL_IDS（逗號清單），否則退回 ODIN_HOTEL_ID
   const hotelIdsRaw = String(process.env.ODIN_HOTEL_IDS || "").trim();
   const hotelIdEnv = String(process.env.ODIN_HOTEL_ID || "").trim();
@@ -77,20 +84,44 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // - 若沒含且為多館別 → 自動在檔名插入 _<hotelId>
   const snapshotPathEnv = String(process.env.ODIN_SNAPSHOT_PATH || "").trim();
 
+  function normalizeSnapshotPath(p) {
+    if (!p) return "";
+    // 若是相對路徑，統一落到 outDir，避免散落 repo 根目錄
+    if (!p.startsWith("/") && !p.includes(":/") && !p.startsWith(outDir + "/")) return `${outDir}/${p}`;
+    return p;
+  }
+
   function snapshotPathFor(hotelId) {
     if (snapshotPathEnv) {
-      if (snapshotPathEnv.includes("{hotelId}")) return snapshotPathEnv.replace(/\{hotelId\}/g, String(hotelId));
+      const baseInput = normalizeSnapshotPath(snapshotPathEnv);
+
+      if (baseInput.includes("{hotelId}")) return baseInput.replace(/\{hotelId\}/g, String(hotelId));
+
       if (hotelIds.length > 1) {
-        const m = snapshotPathEnv.match(/^(.*?)(\.[^.]+)?$/);
-        const base = m ? m[1] : snapshotPathEnv;
+        const m = baseInput.match(/^(.*?)(\.[^.]+)?$/);
+        const base = m ? m[1] : baseInput;
         const ext = m && m[2] ? m[2] : ".json";
         return `${base}_${hotelId}${ext}`;
       }
-      return snapshotPathEnv;
+
+      return baseInput;
     }
+
     return `${outDir}/orders_last_snapshot_${hotelId}.json`;
   }
   // ======================
+
+  // ✅ 這行非常關鍵：你從 Actions log 一眼看出寫入模式有沒有被打開 + 重要 env 是否缺漏
+  console.log(
+    "🧾 sheet write mode:",
+    writeSheet ? "ON" : "OFF",
+    "| gasUrl=",
+    gasUrl ? "set" : "missing",
+    "| sheetToken=",
+    sheetToken ? "set" : "missing",
+    "| spreadsheetId=",
+    spreadsheetId ? "set" : "missing"
+  );
 
   const loginUrl =
     "https://auth.owlting.com/project/d0b8b1335b7beb195f5f9b7626e83341/login?redirect=https://api.owlting.com/booking/v2/admin/sso";
@@ -331,6 +362,37 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     try { fs.writeFileSync(p, JSON.stringify(mapObj, null, 2), "utf8"); } catch (_) {}
   }
 
+  async function syncToSheetOrThrow(payload, hotelId, hotelName) {
+    // 若沒開寫入就略過（但仍會在最前面 log 模式）
+    if (!writeSheet) return;
+
+    if (!gasUrl) throw new Error("Missing ODIN_SHEET_WEBAPP_URL");
+    if (!sheetToken) throw new Error("Missing ODIN_SHEET_TOKEN");
+    if (!spreadsheetId) throw new Error("Missing ODIN_SPREADSHEET_ID");
+
+    const resp = await page.request.post(gasUrl, {
+      data: payload,
+      headers: { "content-type": "application/json" }
+    });
+
+    const http = resp.status();
+    const text = await resp.text().catch(() => "");
+
+    let j = null;
+    try { j = JSON.parse(text); } catch (_) {}
+
+    if (http < 200 || http >= 300) {
+      throw new Error(`GAS sync failed: hotelId=${hotelId} http=${http} body=${text.slice(0, 600)}`);
+    }
+
+    // ✅ 防止「200 但其實回 HTML / 沒執行 doPost」
+    if (!j || j.ok !== true) {
+      throw new Error(`GAS sync not ok: hotelId=${hotelId} http=${http} body=${text.slice(0, 600)}`);
+    }
+
+    console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
+  }
+
   async function runOneHotel(hotelId) {
     const hotelName = hotelNameById[String(hotelId)] || "";
 
@@ -394,13 +456,30 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       rows.push(row);
     }
 
+    const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
     fs.writeFileSync(
-      `${outDir}/orders_sheet_ready_${hotelId}.json`,
+      sheetReadyPath,
       JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows }, null, 2),
       "utf8"
     );
 
-    console.log("✅ wrote:", `${outDir}/orders_sheet_ready_${hotelId}.json`, "rows =", rows.length);
+    console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
+
+    // ✅ 策略一：每館抓完就寫入 Sheet（就算 rows=0 也會寫入，方便建立表頭/分頁）
+    await syncToSheetOrThrow(
+      {
+        token: sheetToken,
+        spreadsheetId,
+        hotelId,
+        hotelName,
+        startDate,
+        days,
+        columns,
+        rows
+      },
+      hotelId,
+      hotelName
+    );
 
     if (changedOnly) {
       const snapshotPath = snapshotPathFor(hotelId);
@@ -418,8 +497,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
       writeSnapshotSafe(snapshotPath, next);
 
+      const changedPath = `${outDir}/orders_sheet_ready_changed_${hotelId}.json`;
       fs.writeFileSync(
-        `${outDir}/orders_sheet_ready_changed_${hotelId}.json`,
+        changedPath,
         JSON.stringify({ hotelId, hotelName, startDate, days, columns, rows: out }, null, 2),
         "utf8"
       );
