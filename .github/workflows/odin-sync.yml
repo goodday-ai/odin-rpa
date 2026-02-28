@@ -1,0 +1,59 @@
+name: Odin Sync (Playwright)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # ✅ 每天 Asia/Taipei 03:00 = UTC 19:00
+    - cron: "0 19 * * *"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      # ✅ 基本參數（必要時你再改）
+      ODIN_LANG: zh_tw
+      ODIN_DAYS: "90"
+      ODIN_OUT_DIR: "out"
+
+      # ✅ 取消單過濾
+      ODIN_EXCLUDE_CANCELLED: "1"
+      ODIN_CANCEL_STATUS: "cancelled,canceled,void,invalid"
+
+      # ✅ 多館別輪巡節流（毫秒）
+      ODIN_THROTTLE_MS: "250"
+
+      # ✅ 增量（先關掉；等你要用 snapshot 再開）
+      ODIN_CHANGED_ONLY: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Odin sync
+        env:
+          ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
+          ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
+          ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
+        run: |
+          npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: odin-out
+          path: out
