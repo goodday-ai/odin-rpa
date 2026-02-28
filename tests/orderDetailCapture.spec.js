@@ -3,7 +3,7 @@
 require("dotenv").config();
 const { test, expect } = require("@playwright/test");
 const fs = require("fs");
-const { format, addDays, parseISO } = require("date-fns");
+const { format, addDays, parseISO, isValid } = require("date-fns");
 
 /**
  * ✅ 功能（多館別輪巡版）：
@@ -22,6 +22,7 @@ const { format, addDays, parseISO } = require("date-fns");
  * - out/orders_sheet_ready_changed_<hotelId>.json（ODIN_CHANGED_ONLY=1）
  * - out/orders_last_snapshot_<hotelId>.json（每館獨立）
  * - out/diag_no_bearer.png（若 Bearer 抓不到）
+ * - ✅ out/diag_filter_<hotelId>.json（漏斗診斷：為什麼 rows 變 0）
  */
 
 test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", async ({ page }) => {
@@ -39,15 +40,28 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       month: "2-digit",
       day: "2-digit"
     });
-    return dtf.format(new Date());
+    return dtf.format(new Date()); // yyyy-mm-dd
+  }
+
+  function clampInt(n, min, max, fallback) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return fallback;
+    const v = Math.trunc(x);
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
   }
 
   const outDir = (process.env.ODIN_OUT_DIR || "out").trim() || "out";
   fs.mkdirSync(outDir, { recursive: true });
 
-  const startDate = process.env.ODIN_START_DATE || taipeiTodayYMD();
-const daysRaw = Number(process.env.ODIN_DAYS || "90");
-const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
+  const startDate = String(process.env.ODIN_START_DATE || taipeiTodayYMD()).trim() || taipeiTodayYMD();
+  const startDateISO = parseISO(startDate);
+  if (!isValid(startDateISO)) throw new Error(`Invalid ODIN_START_DATE: ${startDate} (expect YYYY-MM-DD)`);
+
+  // ✅ ODIN_DAYS：支援 1~180（你要 120 天，沒問題）
+  const days = clampInt(process.env.ODIN_DAYS || "90", 1, 180, 90);
+
   const lang = process.env.ODIN_LANG || "zh_tw";
 
   const listHotelsOnly = String(process.env.ODIN_LIST_HOTELS_ONLY || "0") === "1";
@@ -69,7 +83,6 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
     let s = String(raw || "").trim();
-    // 去掉前後引號（使用者常貼成 "https://..." 或 'https://...'）
     s = s.replace(/^"+/, "").replace(/"+$/, "");
     s = s.replace(/^'+/, "").replace(/'+$/, "");
     return s;
@@ -129,7 +142,6 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     return gasUrl;
   }
 
-  // ✅ 注意：這裡先保留 raw，真正要用時再 assert，錯誤才會清楚
   const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
   const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
   const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
@@ -145,13 +157,10 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
       : [];
 
   // Snapshot 檔名：允許使用者指定模板
-  // - 若 ODIN_SNAPSHOT_PATH 含 {hotelId} → 直接替換
-  // - 若沒含且為多館別 → 自動在檔名插入 _<hotelId>
   const snapshotPathEnv = String(process.env.ODIN_SNAPSHOT_PATH || "").trim();
 
   function normalizeSnapshotPath(p) {
     if (!p) return "";
-    // 若是相對路徑，統一落到 outDir，避免散落 repo 根目錄
     if (!p.startsWith("/") && !p.includes(":/") && !p.startsWith(outDir + "/")) return `${outDir}/${p}`;
     return p;
   }
@@ -174,9 +183,7 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
 
     return `${outDir}/orders_last_snapshot_${hotelId}.json`;
   }
-  // ======================
 
-  // ✅ 這行非常關鍵：你從 Actions log 一眼看出寫入模式有沒有被打開 + 重要 env 是否缺漏
   console.log(
     "🧾 sheet write mode:",
     writeSheet ? "ON" : "OFF",
@@ -185,7 +192,11 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     "| sheetToken=",
     sheetToken ? "set" : "missing",
     "| spreadsheetId=",
-    spreadsheetId ? "set" : "missing"
+    spreadsheetId ? "set" : "missing",
+    "| days=",
+    String(days),
+    "| startDate=",
+    startDate
   );
 
   const loginUrl =
@@ -377,7 +388,7 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     return String(v).replace(/,/g, "").trim();
   }
 
-  // ✅ 取消單判斷加固（擴大 key + 旗標 + JSON 掃描保險）
+  // ✅ 取消單判斷：只看「明確欄位/旗標」，不做 JSON 全包掃描（避免誤殺）
   function getStatusText(it) {
     const v = pick(it, [
       "status",
@@ -388,16 +399,13 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
       "order_state",
       "status_text",
       "order_status_text",
-      "booking_status_text",
-      "cancel_status",
-      "cancel_reason"
+      "booking_status_text"
     ]);
     if (v == null) return "";
     return String(v).trim().toLowerCase();
   }
 
   function isCancelledOrder(it) {
-    // 1) 明確 status 欄位
     const s = getStatusText(it);
     if (s) {
       if (cancelStatusSet.includes(s)) return true;
@@ -408,17 +416,8 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
       if (s.includes("作廢")) return true;
     }
 
-    // 2) 明確布林旗標
-    const flag = pick(it, ["is_cancelled", "is_canceled", "cancelled", "canceled", "voided"]);
+    const flag = pick(it, ["is_cancelled", "is_canceled", "cancelled", "canceled", "voided", "is_void"]);
     if (flag === true || String(flag).toLowerCase() === "true") return true;
-
-    // 3) 保險：整包掃描（nested 欄位藏太深也能擋）
-    const blob = JSON.stringify(it).toLowerCase();
-    if (blob.includes("cancel")) return true;
-    if (blob.includes("void")) return true;
-    if (blob.includes("invalid")) return true;
-    if (blob.includes("取消")) return true;
-    if (blob.includes("作廢")) return true;
 
     return false;
   }
@@ -464,7 +463,6 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     if (!sheetToken) throw new Error("Missing ODIN_SHEET_TOKEN (GitHub Secrets)");
     if (!spreadsheetId) throw new Error("Missing ODIN_SPREADSHEET_ID (GitHub Secrets)");
 
-    // ✅ 這裡才做 URL 硬校驗：錯誤會帶 diag（不洩漏內容）
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
     let resp;
@@ -497,7 +495,6 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
       );
     }
 
-    // ✅ 防止「200 但其實回 HTML / 沒執行 doPost」
     if (!j || j.ok !== true) {
       throw new Error(
         `GAS sync not ok: hotelId=${hotelId} http=${http}\n` +
@@ -511,7 +508,7 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
   async function runOneHotel(hotelId) {
     const hotelName = hotelNameById[String(hotelId)] || "";
 
-    const from = parseISO(startDate);
+    const from = startDateISO;
     const to = addDays(from, days - 1);
     const rangeStr = `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
 
@@ -544,23 +541,64 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     const listData = Array.isArray(listJson.data) ? listJson.data : [];
     console.log("✅ calendar_list:", hotelId, hotelName ? `(${hotelName})` : "", "items =", listData.length);
 
+    // ✅ 漏斗診斷：rows=0 時你不用猜
+    const diag = {
+      hotelId: String(hotelId),
+      hotelName,
+      totalItems: listData.length,
+      keptRows: 0,
+      drop: {
+        missingSerial: 0,
+        serialNotOBE: 0,
+        cancelled: 0,
+        missingDates: 0
+      },
+      samples: {
+        firstSerial: "",
+        firstStatus: "",
+        firstDates: { checkinRaw: "", checkoutRaw: "" }
+      }
+    };
+
     const rows = [];
-    const cancelledSkipped = { count: 0 };
 
     for (const it of listData) {
       const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
-      if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
+
+      if (!diag.samples.firstSerial && orderSerial) diag.samples.firstSerial = String(orderSerial);
+
+      if (!orderSerial) {
+        diag.drop.missingSerial++;
+        continue;
+      }
+
+      // ✅ 你目前只要 OBE；若未來前綴改了，diag 會告訴你 serialNotOBE 暴增
+      if (!String(orderSerial).startsWith("OBE")) {
+        diag.drop.serialNotOBE++;
+        continue;
+      }
+
+      const st = getStatusText(it);
+      if (!diag.samples.firstStatus && st) diag.samples.firstStatus = st;
 
       if (excludeCancelled && isCancelledOrder(it)) {
-        cancelledSkipped.count++;
+        diag.drop.cancelled++;
         continue;
+      }
+
+      const checkinRaw = pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"]);
+      const checkoutRaw = pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"]);
+
+      if (!diag.samples.firstDates.checkinRaw && (checkinRaw || checkoutRaw)) {
+        diag.samples.firstDates.checkinRaw = String(checkinRaw || "");
+        diag.samples.firstDates.checkoutRaw = String(checkoutRaw || "");
       }
 
       const row = {
         訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
         訂單編號: String(orderSerial),
-        入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
-        退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
+        入住日期: toSheetDate(checkinRaw),
+        退房日期: toSheetDate(checkoutRaw),
         姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
         房型: pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
         專案名稱: pick(it, ["source", "order_category", "plan_name", "project_name", "rate_plan_name"]),
@@ -571,9 +609,17 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
         電話: pick(it, ["phone", "mobile", "tel", "customer_phone"])
       };
 
-      if (!row.入住日期 || !row.退房日期) continue;
+      if (!row.入住日期 || !row.退房日期) {
+        diag.drop.missingDates++;
+        continue;
+      }
+
       rows.push(row);
+      diag.keptRows++;
     }
+
+    fs.writeFileSync(`${outDir}/diag_filter_${hotelId}.json`, JSON.stringify(diag, null, 2), "utf8");
+    console.log("🧪 diag:", hotelId, `items=${diag.totalItems}`, `rows=${diag.keptRows}`, JSON.stringify(diag.drop));
 
     const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
     fs.writeFileSync(
@@ -583,9 +629,7 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     );
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
-    if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
 
-    // ✅ 策略一：每館抓完就寫入 Sheet（就算 rows=0 也會寫入，方便建立表頭/分頁）
     await syncToSheetOrThrow(
       {
         token: sheetToken,
@@ -628,7 +672,7 @@ const days = daysRaw === 60 || daysRaw === 90 ? daysRaw : 90;
     }
 
     if (!rows.length) {
-      console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
+      console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾；請看 out/diag_filter_<hotelId>.json");
     }
   }
 
