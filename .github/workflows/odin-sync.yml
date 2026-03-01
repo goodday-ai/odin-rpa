@@ -3,12 +3,14 @@ name: Odin Sync (Playwright)
 on:
   workflow_dispatch:
   schedule:
-    # ✅ Asia/Taipei 00:00 = UTC 16:00（前一天）
+    # ✅ 每天台北 00:00（= UTC 前一天 16:00）
     - cron: "0 16 * * *"
-    # ✅ Asia/Taipei 06:00 = UTC 22:00（前一天）→ 校正（全量）
+    # ✅ 每天台北 06:00（= UTC 前一天 22:00）
     - cron: "0 22 * * *"
-    # ✅ Asia/Taipei 12:00 = UTC 04:00
+    # ✅ 每天台北 12:00（= UTC 04:00）
     - cron: "0 4 * * *"
+    # ✅ 每天台北 18:00（= UTC 10:00）
+    - cron: "0 10 * * *"
 
 concurrency:
   group: odin-sync
