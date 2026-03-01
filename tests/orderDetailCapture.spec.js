@@ -475,7 +475,30 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (v == null) return "";
     return String(v).replace(/,/g, "").trim();
   }
+  
+  // ✅ 電話正規化：
+  // - 去除：所有空格、以及「-」
+  // - 開頭是 +886 / 886：轉成 0 開頭
+  // - 若轉換後變成 00 開頭：刪掉第一個 0（避免 00xxxxxxxx）
+  function normalizePhone(raw) {
+    let s = String(raw == null ? "" : raw).trim();
+    if (!s) return "";
 
+    // 移除空格與 -
+    s = s.replace(/[\s-]+/g, "");
+
+    // +886xxxxxxx -> 0xxxxxxx
+    if (s.startsWith("+886")) s = "0" + s.slice(4);
+
+    // 886xxxxxxx -> 0xxxxxxx
+    if (s.startsWith("886")) s = "0" + s.slice(3);
+
+    // 00xxxxxxxx -> 0xxxxxxxx
+    if (s.startsWith("00")) s = s.slice(1);
+
+    return s;
+  }
+  
   // ✅ 取消單判斷：只看「明確欄位/旗標」
   function getStatusText(it) {
     const v = pick(it, [
@@ -723,8 +746,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
           剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
           UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
-          // ✅ 電話一律當字串（避免 0 開頭被當數字）
-          電話: String(pick(it, ["phone", "mobile", "tel", "customer_phone"]) || "")
+          // ✅ 電話一律當字串（避免 0 開頭被當數字）+ 正規化（去空白/-、886 → 0）
+          電話: normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]))
         };
 
         if (!row.入住日期 || !row.退房日期) continue;
