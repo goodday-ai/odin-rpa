@@ -570,6 +570,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     const rangeStr = buildRangeStr();
 
     const rows = [];
+    const cancelledOrderNos = [];
     let pageNo = 1;
     let totalPages = 1;
 
@@ -606,7 +607,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
         if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
 
-        if (excludeCancelled && isCancelledOrder(it)) {
+        const cancelled = isCancelledOrder(it);
+        if (cancelled) cancelledOrderNos.push(String(orderSerial));
+
+        if (excludeCancelled && cancelled) {
           cancelledSkipped.count++;
           continue;
         }
@@ -651,6 +655,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         hotelName,
         columns,
         rows,
+        cancelledOrderNos: Array.from(new Set(cancelledOrderNos)),
         rangeStr
       },
       hotelId,
