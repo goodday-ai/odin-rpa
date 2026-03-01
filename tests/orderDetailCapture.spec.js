@@ -93,6 +93,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
 
+  const fetchDetail = String(process.env.ODIN_FETCH_DETAIL || "1") === "1"; // ✅ 取訂單 detail 補「專案名稱(方案/Plan)」
+  const detailThrottleMsRaw = Number(process.env.ODIN_DETAIL_THROTTLE_MS || "0");
+  const detailThrottleMs = Number.isFinite(detailThrottleMsRaw) ? Math.max(0, Math.min(3000, detailThrottleMsRaw)) : 0;
+
   // ✅ 策略一（寫入 Sheet）：GAS Web App
   const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
 
@@ -324,6 +328,45 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     } catch (e) {
       return { ok: false, httpStatus: 0, json: {}, url, error: String(e && e.message ? e.message : e) };
     }
+  }
+
+  // =======================================================
+  // ✅ 訂單 detail：取真實「方案/Plan 名稱」當作「專案名稱」
+  // - 你在列表看到的 Booking.com / 手動訂單 / 官網訂單，多半是 order_source（訂單來源）
+  // - 真正你要的「獨享包棟 / 2F 包棟 / 3F 包棟 / Booking」通常在 detail.rooms[].plan_name
+  // =======================================================
+  function _uniqNonEmpty_(arr) {
+    const out = [];
+    const seen = new Set();
+    for (const v of Array.isArray(arr) ? arr : []) {
+      const s = String(v == null ? "" : v).trim();
+      if (!s) continue;
+      if (seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+    }
+    return out;
+  }
+
+  function extractProjectNameFromDetail(detailJson) {
+    const d = detailJson && detailJson.data ? detailJson.data : null;
+    if (!d) return "";
+
+    // rooms: [{ plan_name, room_name, ... }]
+    const rooms = Array.isArray(d.rooms) ? d.rooms : [];
+    const planNames = _uniqNonEmpty_(rooms.map(r => r && r.plan_name ? r.plan_name : ""));
+    if (planNames.length) return planNames.join("｜");
+
+    // 後備：room_name（若 plan_name 真的沒有）
+    const roomNames = _uniqNonEmpty_(rooms.map(r => r && r.room_name ? r.room_name : ""));
+    if (roomNames.length) return roomNames.join("｜");
+
+    return "";
+  }
+
+  async function fetchOrderDetail(hotelId, orderSerial, headers) {
+    const url = `https://www.owlting.com/booking/v2/admin/hotels/${hotelId}/orders/${encodeURIComponent(orderSerial)}/detail?lang=zh_TW&_=${Date.now()}`;
+    return fetchJsonSafe(url, headers);
   }
 
   async function discoverHotels() {
@@ -576,6 +619,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const cancelledSkipped = { count: 0 };
 
+    // ✅ 同一筆訂單在列表可能重複出現（跨日/跨房），detail 只抓一次
+    const detailCache = new Map();
+
     while (pageNo <= totalPages) {
       const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
 
@@ -615,6 +661,29 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           continue;
         }
 
+        // ✅ 先用列表可取得的欄位當 fallback（通常是訂單來源）
+        let projectName = pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]);
+
+        // ✅ 再用 detail.rooms[].plan_name 覆蓋（通常才是你真正的「專案名稱」）
+        if (fetchDetail) {
+          const key = String(orderSerial);
+          if (detailCache.has(key)) {
+            projectName = detailCache.get(key);
+          } else {
+            if (detailThrottleMs > 0) await sleep(detailThrottleMs);
+
+            const detailRes = await fetchOrderDetail(hotelId, key, baseHeaders);
+            if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
+              const extracted = extractProjectNameFromDetail(detailRes.json);
+              if (extracted) projectName = extracted;
+              detailCache.set(key, projectName || "");
+            } else {
+              // 失敗就維持 fallback，不中斷整批
+              detailCache.set(key, projectName || "");
+            }
+          }
+        }
+
         const row = {
           訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
           訂單編號: String(orderSerial),
@@ -622,12 +691,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
           姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
           房型: pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
-          專案名稱: pick(it, ["source", "order_category", "plan_name", "project_name", "rate_plan_name"]),
+          專案名稱: projectName,
           訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
           已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
           剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
           UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
-          電話: pick(it, ["phone", "mobile", "tel", "customer_phone"])
+          // ✅ 電話一律當字串（避免 0 開頭被當數字）
+          電話: String(pick(it, ["phone", "mobile", "tel", "customer_phone"]) || "")
         };
 
         if (!row.入住日期 || !row.退房日期) continue;
