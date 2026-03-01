@@ -364,6 +364,18 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return "";
   }
 
+  function extractRoomTypeFromDetail(detailJson) {
+    const d = detailJson && detailJson.data ? detailJson.data : null;
+    if (!d) return "";
+
+    const rooms = Array.isArray(d.rooms) ? d.rooms : [];
+    const cfgNames = _uniqNonEmpty_(rooms.map(r => r && r.room_config_name ? r.room_config_name : ""));
+    if (cfgNames.length) return cfgNames.join("｜");
+
+    return "";
+  }
+
+
   async function fetchOrderDetail(hotelId, orderSerial, headers) {
     const url = `https://www.owlting.com/booking/v2/admin/hotels/${hotelId}/orders/${encodeURIComponent(orderSerial)}/detail?lang=zh_TW&_=${Date.now()}`;
     return fetchJsonSafe(url, headers);
@@ -621,6 +633,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     // ✅ 同一筆訂單在列表可能重複出現（跨日/跨房），detail 只抓一次
     const detailCache = new Map();
+    const roomTypeCache = new Map();
 
     while (pageNo <= totalPages) {
       const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
@@ -665,21 +678,35 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         let projectName = pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]);
 
         // ✅ 再用 detail.rooms[].plan_name 覆蓋（通常才是你真正的「專案名稱」）
+// ✅ 同時取 rooms[].room_config_name 當作「房型」（只要包棟 / 3F 這種層級，不要拼 room_name）
+        let roomType = "";
         if (fetchDetail) {
           const key = String(orderSerial);
+
           if (detailCache.has(key)) {
             projectName = detailCache.get(key);
-          } else {
+          }
+          if (roomTypeCache.has(key)) {
+            roomType = roomTypeCache.get(key);
+          }
+
+          if (!detailCache.has(key) || !roomTypeCache.has(key)) {
             if (detailThrottleMs > 0) await sleep(detailThrottleMs);
 
             const detailRes = await fetchOrderDetail(hotelId, key, baseHeaders);
             if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
-              const extracted = extractProjectNameFromDetail(detailRes.json);
-              if (extracted) projectName = extracted;
+              const extractedProject = extractProjectNameFromDetail(detailRes.json);
+              const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
+
+              if (extractedProject) projectName = extractedProject;
+              if (extractedRoomType) roomType = extractedRoomType;
+
               detailCache.set(key, projectName || "");
+              roomTypeCache.set(key, roomType || "");
             } else {
               // 失敗就維持 fallback，不中斷整批
               detailCache.set(key, projectName || "");
+              roomTypeCache.set(key, roomType || "");
             }
           }
         }
@@ -690,7 +717,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
           退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
           姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
-          房型: pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
+          房型: roomType || pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
           專案名稱: projectName,
           訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
           已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
