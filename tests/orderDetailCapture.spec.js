@@ -623,7 +623,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         `Body: ${text.slice(0, 800)}`
       );
     }
-
+    // ✅ 加在這裡（通過 ok 檢查後，印回傳內容）
+    console.log("📦 GAS resp:", text.slice(0, 1200));
     console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
   }
 
