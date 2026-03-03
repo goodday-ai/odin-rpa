@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sync:
@@ -40,8 +40,8 @@ jobs:
       # ✅ 多館別輪巡節流（毫秒）
       ODIN_THROTTLE_MS: "250"
 
-      # ✅ 策略一：抓完直接寫入 Google Sheet（GAS）
-      ODIN_WRITE_SHEET: "1"
+      # ✅ 預設：鏡像模式（只有 06:00 會開啟寫入 Sheet）
+      ODIN_WRITE_SHEET: "0"
 
       # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
       ODIN_CHANGED_ONLY: "1"
@@ -50,6 +50,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -60,6 +62,10 @@ jobs:
       # ✅ 先建立 out 目錄（cache restore 需要路徑存在也沒關係，但先建最保險）
       - name: Prepare out dir
         run: mkdir -p out
+
+      # ✅ 確保 repo data 目錄存在（要 commit 用）
+      - name: Prepare data dir
+        run: mkdir -p data/odin/latest
 
       # ✅ 還原上一輪 snapshot（讓 changed-only 有「上一版」可比對）
       - name: Restore snapshot cache
@@ -81,19 +87,20 @@ jobs:
           ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
           ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
+
+          # ✅ 只有在 ODIN_WRITE_SHEET=1 時才會用到（06:00 校正時段）
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
 
-          # ✅ 新增：取消掃描開關（你在 Actions Variables 設 ODIN_CANCEL_SCAN=1）
+          # ✅ 取消掃描開關（Actions Variables 設 ODIN_CANCEL_SCAN=1）
           ODIN_CANCEL_SCAN: ${{ vars.ODIN_CANCEL_SCAN }}
 
           # ✅ 可選：取消掃描要抓哪些狀態（沒設就走 repo 預設）
           ODIN_CANCEL_ORDER_STATUS: ${{ vars.ODIN_CANCEL_ORDER_STATUS }}
 
-          # ✅ 可選：取消判斷字典（你 workflow 這邊已有預設，但也可從 vars 統一）
+          # ✅ 可選：取消判斷字典（沒設就用 job env 的預設）
           ODIN_CANCEL_STATUS: ${{ vars.ODIN_CANCEL_STATUS }}
-          
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
@@ -111,28 +118,53 @@ jobs:
           fi
 
           # ✅ 依「觸發時段」覆寫策略
-          # - 00:00 / 12:00 / 18:00：增量更新（ODIN_CHANGED_ONLY=1）
-          # - 06:00：校正（全量）
+          # - 00:00 / 12:00 / 18:00：增量更新 + 只寫 JSON（不寫 Sheet）
+          # - 06:00：校正（全量）+ 寫 Sheet（鏡像）
           if [ "${{ github.event_name }}" = "schedule" ]; then
             case "${{ github.event.schedule }}" in
               "0 22 * * *")
-                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync"
+                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync + write sheet"
                 ODIN_CHANGED_ONLY=0
                 export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=0" >> $GITHUB_ENV
+
+                ODIN_WRITE_SHEET=1
+                export ODIN_WRITE_SHEET
+                echo "ODIN_WRITE_SHEET=1" >> $GITHUB_ENV
                 ;;
               *)
-                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only"
+                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only + JSON only"
                 ODIN_CHANGED_ONLY=1
                 export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=1" >> $GITHUB_ENV
+
+                ODIN_WRITE_SHEET=0
+                export ODIN_WRITE_SHEET
+                echo "ODIN_WRITE_SHEET=0" >> $GITHUB_ENV
                 ;;
             esac
           else
-            echo "Mode: MANUAL → keep repo defaults"
+            echo "Mode: MANUAL → keep repo defaults (ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset})"
           fi
 
+          echo "ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset}"
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
+
+      # ✅ 成功後：把 data/odin/latest 的 JSON commit 回 repo（SSOT）
+      - name: Commit JSON to repo (data/odin/latest)
+        if: success()
+        run: |
+          # 只提交 data/odin/latest 的變更
+          if [ -n "$(git status --porcelain data/odin/latest)" ]; then
+            git config user.name "odin-sync-bot"
+            git config user.email "odin-sync-bot@users.noreply.github.com"
+
+            git add data/odin/latest
+            git commit -m "chore(data): update odin latest JSON (${GITHUB_RUN_ID})"
+            git push
+          else
+            echo "No data changes to commit."
+          fi
 
       # ✅ 成功才修剪：只保留「系統對照必需」的檔案，讓 cache 保持瘦身
       - name: Prune out (success only, keep key files)
