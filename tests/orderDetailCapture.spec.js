@@ -24,6 +24,10 @@ const { format, addDays, parseISO, isValid } = require("date-fns");
  * - ✅ 新增第二輪掃描：ODIN_CANCEL_SCAN=1 時，會用 ODIN_CANCEL_ORDER_STATUS 清單再抓一次取消單
  * - 只收集 cancelledOrderNos，並一併 POST 給 GAS 讓 GAS 刪掉 Sheet 舊資料
  *
+ * ✅ SSOT（Repo JSON 鏡像）：
+ * - 每館輸出的 out/orders_sheet_ready_<hotelId>.json 會同步複製到 data/odin/latest/
+ * - 用於「不依賴 Google API」的快取/鏡像來源（包含電話）
+ *
  * ✅ 重要輸出（全部放在 out/）：
  * - out/odin_me_raw.json
  * - out/odin_hotels_list_raw.json
@@ -182,7 +186,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
 
   // ✅ 訂單狀態（你截圖「已成立」）：常見對應 order_status=normal
-  const orderStatus = String(process.env.ODIN_ORDER_STATUS || "normal").trim(); // UI「已成立」在 DevTools 常見對應 normal
+  const orderStatus = String(process.env.ODIN_ORDER_STATUS || "normal").trim();
   const orderBy = String(process.env.ODIN_ORDER_BY || (useYearMode ? "id" : "checkin")).trim();
   const sortBy = String(process.env.ODIN_SORT_BY || (useYearMode ? "asc" : "")).trim();
 
@@ -475,7 +479,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     const s = String(v || "").trim();
     if (!s) return "";
 
-    // 統一轉成 yyyy/MM/dd，避免同欄位同時出現 - 與 /
     const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
     if (m) {
       const y = m[1];
@@ -493,9 +496,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   }
 
   // ✅ 電話正規化：
-  // - 去除：所有空格、以及「-」
-  // - 開頭是 +886 / 886：轉成 0 開頭
-  // - 若轉換後變成 00 開頭：刪掉第一個 0（避免 00xxxxxxxx）
   function normalizePhone(raw) {
     let s = String(raw == null ? "" : raw).trim();
     if (!s) return "";
@@ -587,6 +587,15 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
+    console.log(
+      "📤 GAS payload:",
+      hotelId,
+      "| rows =",
+      payload && payload.rows ? payload.rows.length : 0,
+      "| cancelNos =",
+      payload && payload.cancelledOrderNos ? payload.cancelledOrderNos.length : 0
+    );
+
     let resp;
     try {
       resp = await page.request.post(gasUrl, {
@@ -623,7 +632,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         `Body: ${text.slice(0, 800)}`
       );
     }
-    // ✅ 加在這裡（通過 ok 檢查後，印回傳內容）
+
     console.log("📦 GAS resp:", text.slice(0, 1200));
     console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
   }
@@ -766,7 +775,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     // =======================================================
     // ✅ 第二輪（可選）：掃描取消單，只收集 cancelledOrderNos
-    // - 因為第一輪常用 order_status=normal，API 不一定回傳取消單
     // =======================================================
     if (cancelScan && cancelOrderStatusList.length) {
       for (const cancelStatus of cancelOrderStatusList) {
@@ -811,18 +819,25 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       JSON.stringify({ hotelId, hotelName, rangeStr, columns, rows }, null, 2),
       "utf8"
     );
-    
+
     // ✅ SSOT：同步寫一份到 repo（包含電話）
     const dataDir = "data/odin/latest";
     try { fs.mkdirSync(dataDir, { recursive: true }); } catch (_) {}
-    try { fs.copyFileSync(sheetReadyPath, `${dataDir}/orders_sheet_ready_${hotelId}.json`); } catch (_) {}
-    
+
+    try {
+      fs.copyFileSync(sheetReadyPath, `${dataDir}/orders_sheet_ready_${hotelId}.json`);
+    } catch (e) {
+      console.log("⚠️ write SSOT failed:", hotelId, String(e && e.message ? e.message : e));
+    }
+
     const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
+    console.log("🧾 cancelScan:", cancelScan ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
     if (cancelScan) console.log("🧹 cancelled scanned:", hotelId, "unique =", uniqueCancelled.length);
 
+    // ✅ 提醒：鏡像模式下 ODIN_WRITE_SHEET=0，這段會自動略過（不打 Google）
     await syncToSheetOrThrow(
       {
         token: sheetToken,
