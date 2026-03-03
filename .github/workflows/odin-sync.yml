@@ -40,18 +40,16 @@ jobs:
       # ✅ 多館別輪巡節流（毫秒）
       ODIN_THROTTLE_MS: "250"
 
-      # ✅ ✅ 強制：不論手動/自動都寫入 Google Sheet（GAS）
-      ODIN_WRITE_SHEET: "1"
+      # ✅ 鏡像模式：同時寫 JSON（repo SSOT）+（依你當下策略）可寫 Sheet
+      ODIN_WRITE_SHEET: "0"
 
       # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
       ODIN_CHANGED_ONLY: "1"
       ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
 
-      # ✅ ✅ 強制：取消單掃描一律運作
-      ODIN_CANCEL_SCAN: "1"
-
-      # ✅ 取消掃描要抓哪些狀態（可依你 Odin 真實狀態調整）
-      ODIN_CANCEL_ORDER_STATUS: "cancelled,canceled,void,invalid"
+      # ✅ Detail cache：預設只打「新訂單」（不強刷）
+      ODIN_FETCH_DETAIL: "1"
+      ODIN_DETAIL_FORCE_REFRESH: "0"
 
     steps:
       - name: Checkout
@@ -65,13 +63,14 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # ✅ 先建立 out 目錄（cache restore 需要路徑存在也沒關係，但先建最保險）
       - name: Prepare out dir
         run: mkdir -p out
 
-      # ✅ 確保 repo data 目錄存在（要 commit 用）
-      - name: Prepare data dir
-        run: mkdir -p data/odin/latest
+      # ✅ 確保 repo SSOT 目錄存在（要 commit 用）
+      - name: Prepare SSOT dirs
+        run: |
+          mkdir -p data/odin/latest
+          mkdir -p data/odin/cache
 
       # ✅ 還原上一輪 snapshot（讓 changed-only 有「上一版」可比對）
       - name: Restore snapshot cache
@@ -94,10 +93,18 @@ jobs:
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
           ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
 
-          # ✅ 寫入 Sheet 必備
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
+
+          # ✅ 取消掃描開關（Actions Variables 設 ODIN_CANCEL_SCAN=1）
+          ODIN_CANCEL_SCAN: ${{ vars.ODIN_CANCEL_SCAN }}
+
+          # ✅ 可選：取消掃描要抓哪些狀態（沒設就走 repo 預設）
+          ODIN_CANCEL_ORDER_STATUS: ${{ vars.ODIN_CANCEL_ORDER_STATUS }}
+
+          # ✅ 可選：取消判斷字典（沒設就用 job env 的預設）
+          ODIN_CANCEL_STATUS: ${{ vars.ODIN_CANCEL_STATUS }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
@@ -114,51 +121,63 @@ jobs:
             echo "Use ODIN_YEAR from env/secrets: ${ODIN_YEAR}"
           fi
 
-          # ✅ 保留你原本的排程策略：06:00 全量校正，其餘時段增量
-          # （但不論何時段，都會寫入 Sheet，因為 ODIN_WRITE_SHEET=1 已固定）
+          # ✅ 依「觸發時段」覆寫策略
+          # - 00:00 / 12:00 / 18:00：增量更新 + 只寫 JSON（不寫 Sheet）
+          # - 06:00：校正（全量）+ 寫 Sheet（鏡像）
           if [ "${{ github.event_name }}" = "schedule" ]; then
             case "${{ github.event.schedule }}" in
               "0 22 * * *")
-                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync"
+                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync + write sheet"
                 ODIN_CHANGED_ONLY=0
                 export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=0" >> $GITHUB_ENV
+
+                ODIN_WRITE_SHEET=1
+                export ODIN_WRITE_SHEET
+                echo "ODIN_WRITE_SHEET=1" >> $GITHUB_ENV
                 ;;
               *)
-                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only"
+                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only + JSON only"
                 ODIN_CHANGED_ONLY=1
                 export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=1" >> $GITHUB_ENV
+
+                ODIN_WRITE_SHEET=0
+                export ODIN_WRITE_SHEET
+                echo "ODIN_WRITE_SHEET=0" >> $GITHUB_ENV
                 ;;
             esac
           else
-            echo "Mode: MANUAL → keep ODIN_CHANGED_ONLY=${ODIN_CHANGED_ONLY:-unset}"
+            echo "Mode: MANUAL → keep repo defaults (ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset})"
           fi
 
-          echo "ODIN_YEAR=${ODIN_YEAR:-unset}"
-          echo "ODIN_CHANGED_ONLY=${ODIN_CHANGED_ONLY:-unset}"
-          echo "ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset}"
+          echo "ODIN_YEAR=${ODIN_YEAR}"
+          echo "ODIN_CHANGED_ONLY=${ODIN_CHANGED_ONLY}"
+          echo "ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET}"
           echo "ODIN_CANCEL_SCAN=${ODIN_CANCEL_SCAN:-unset}"
           echo "ODIN_CANCEL_ORDER_STATUS=${ODIN_CANCEL_ORDER_STATUS:-unset}"
 
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
-      # ✅ 成功後：把 data/odin/latest 的 JSON commit 回 repo（SSOT）
-      - name: Commit JSON to repo (data/odin/latest)
+      # ✅ 成功後：把 SSOT（latest + cache）commit 回 repo
+      - name: Commit SSOT JSON to repo (data/odin/latest + data/odin/cache)
         if: success()
         run: |
           echo "Preview data/odin/latest:"
           ls -al data/odin/latest || true
 
-          if [ -n "$(git status --porcelain data/odin/latest)" ]; then
+          echo "Preview data/odin/cache:"
+          ls -al data/odin/cache || true
+
+          if [ -n "$(git status --porcelain data/odin)" ]; then
             git config user.name "odin-sync-bot"
             git config user.email "odin-sync-bot@users.noreply.github.com"
 
-            git add data/odin/latest
-            git commit -m "chore(odin): update latest JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
+            git add data/odin
+            git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
             git push
           else
-            echo "No data changes to commit."
+            echo "No SSOT data changes to commit."
           fi
 
       # ✅ 成功才修剪：只保留「系統對照必需」的檔案，讓 cache 保持瘦身
@@ -168,7 +187,6 @@ jobs:
           echo "Before prune:"
           ls -al out || true
 
-          # ✅ 保留：snapshot + 主要輸出 + 鑑識用 raw（避免追 bug 沒證據）
           find out -type f \
             ! -name "orders_last_snapshot_"'*'".json" \
             ! -name "orders_sheet_ready_"'*'".json" \
@@ -180,7 +198,6 @@ jobs:
           echo "After prune:"
           ls -al out || true
 
-      # ✅ 成功才寫回 cache：避免失敗時把「壞的/不完整的 out」覆蓋掉上一份可用 snapshot
       - name: Save snapshot cache (success only)
         if: success()
         uses: actions/cache@v4
@@ -188,7 +205,6 @@ jobs:
           path: out
           key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
-      # ✅ 只有失敗才上傳 artifact（debug 用），而且短保留，不會長胖
       - name: Upload artifacts (failure only)
         if: failure()
         uses: actions/upload-artifact@v4
