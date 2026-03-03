@@ -33,7 +33,7 @@ jobs:
       ODIN_YEAR: ""
       ODIN_DAYS: "120"
 
-      # ✅ 取消單過濾（會把取消單交給 GAS 刪除）
+      # ✅ 取消單過濾（正常單那輪會把取消單排除）
       ODIN_EXCLUDE_CANCELLED: "1"
       ODIN_CANCEL_STATUS: "cancelled,canceled,void,invalid"
 
@@ -44,12 +44,16 @@ jobs:
       ODIN_WRITE_SHEET: "1"
 
       # ✅ 強制：永遠跑取消單掃描（第二輪）
+      # ⚠️ Odin 真實 API 是 order_status=cancel
       ODIN_CANCEL_SCAN: "1"
-      ODIN_CANCEL_ORDER_STATUS: "cancelled,canceled,void,invalid"
+      ODIN_CANCEL_ORDER_STATUS: "cancel"
 
       # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
       ODIN_CHANGED_ONLY: "1"
       ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
+
+      # ✅ 把 SSOT 推到不觸發 Vercel 的分支
+      ODIN_DATA_BRANCH: "odin-data"
 
     steps:
       - name: Checkout
@@ -63,11 +67,9 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Prepare out dir
-        run: mkdir -p out
-
-      - name: Prepare data dir
+      - name: Prepare dirs
         run: |
+          mkdir -p out
           mkdir -p data/odin/latest
           mkdir -p data/odin/cache
 
@@ -110,10 +112,10 @@ jobs:
             echo "Use ODIN_YEAR from env/secrets: ${ODIN_YEAR}"
           fi
 
-          # ✅ 強制：寫入 Sheet + 取消掃描（避免手動跑變 OFF）
-          echo "ODIN_WRITE_SHEET=1" >> $GITHUB_ENV
-          echo "ODIN_CANCEL_SCAN=1" >> $GITHUB_ENV
-          echo "ODIN_CANCEL_ORDER_STATUS=cancelled,canceled,void,invalid" >> $GITHUB_ENV
+          # ✅ 強制寫入 + 強制取消掃描（避免任何情境被覆寫成 OFF）
+          export ODIN_WRITE_SHEET=1
+          export ODIN_CANCEL_SCAN=1
+          export ODIN_CANCEL_ORDER_STATUS=cancel
 
           echo "ODIN_YEAR=${ODIN_YEAR:-unset}"
           echo "ODIN_CHANGED_ONLY=${ODIN_CHANGED_ONLY:-unset}"
@@ -123,7 +125,8 @@ jobs:
 
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
-      - name: Commit JSON to repo (data/odin/*)
+      # ✅ 把 data/odin/* 推到 odin-data 分支，避免 Vercel 因 main commit 連續部署而 blocked
+      - name: Commit SSOT JSON to odin-data branch
         if: success()
         run: |
           echo "Preview data/odin/latest:"
@@ -131,17 +134,20 @@ jobs:
           echo "Preview data/odin/cache:"
           ls -al data/odin/cache || true
 
-          if [ -n "$(git status --porcelain data/odin)" ]; then
-            # ✅ 改成 GitHub Actions 官方 bot 身分（Vercel 會認得，不會 Block）
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add data/odin
-            git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
-            git push
-          else
+          if [ -z "$(git status --porcelain data/odin)" ]; then
             echo "No data changes to commit."
+            exit 0
           fi
+
+          git config user.name "odin-sync-bot"
+          git config user.email "odin-sync-bot@users.noreply.github.com"
+
+          # ✅ 切到資料分支（不存在就新建），只帶上目前 workspace 變更
+          git checkout -B "${ODIN_DATA_BRANCH}"
+
+          git add data/odin
+          git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
+          git push -u origin "${ODIN_DATA_BRANCH}"
 
       - name: Prune out (success only, keep key files)
         if: success()
