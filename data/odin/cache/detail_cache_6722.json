@@ -1,0 +1,44 @@
+{
+  "OBE18010672225121901": {
+    "projectName": "連住專案",
+    "roomType": "default_room_config",
+    "phone": "0952790502",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE86120672226011501": {
+    "projectName": "Trip",
+    "roomType": "default_room_config",
+    "phone": "0983381719",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE74050672226011601": {
+    "projectName": "官網專案",
+    "roomType": "default_room_config",
+    "phone": "0910384951",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE00890672226013001": {
+    "projectName": "Trip",
+    "roomType": "default_room_config",
+    "phone": "0911188075",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE34980672226013101": {
+    "projectName": "5-8月花火節連住限定專案",
+    "roomType": "default_room_config",
+    "phone": "0938883806",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE29540672226022401": {
+    "projectName": "連住專案",
+    "roomType": "default_room_config",
+    "phone": "0987435908",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE15750672226022601": {
+    "projectName": "連住專案",
+    "roomType": "default_room_config",
+    "phone": "0971226275",
+    "updatedAt": "2026-03-04"
+  }
+}
