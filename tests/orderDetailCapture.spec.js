@@ -811,7 +811,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       JSON.stringify({ hotelId, hotelName, rangeStr, columns, rows }, null, 2),
       "utf8"
     );
-
+    
+    // ✅ SSOT：同步寫一份到 repo（包含電話）
+    const dataDir = "data/odin/latest";
+    try { fs.mkdirSync(dataDir, { recursive: true }); } catch (_) {}
+    try { fs.copyFileSync(sheetReadyPath, `${dataDir}/orders_sheet_ready_${hotelId}.json`); } catch (_) {}
+    
     const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
