@@ -40,19 +40,24 @@ jobs:
       # ✅ 多館別輪巡節流（毫秒）
       ODIN_THROTTLE_MS: "250"
 
-      # ✅ 預設：鏡像模式（只有 06:00 會開啟寫入 Sheet）
-      ODIN_WRITE_SHEET: "0"
+      # ✅ ✅ 強制：不論手動/自動都寫入 Google Sheet（GAS）
+      ODIN_WRITE_SHEET: "1"
 
       # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
       ODIN_CHANGED_ONLY: "1"
       ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
+
+      # ✅ ✅ 強制：取消單掃描一律運作
+      ODIN_CANCEL_SCAN: "1"
+
+      # ✅ 取消掃描要抓哪些狀態（可依你 Odin 真實狀態調整）
+      ODIN_CANCEL_ORDER_STATUS: "cancelled,canceled,void,invalid"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -60,7 +65,7 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # ✅ 先建立 out 目錄（cache restore 需要路徑存在）
+      # ✅ 先建立 out 目錄（cache restore 需要路徑存在也沒關係，但先建最保險）
       - name: Prepare out dir
         run: mkdir -p out
 
@@ -89,30 +94,13 @@ jobs:
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
           ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
 
-          # ✅ 只有在 ODIN_WRITE_SHEET=1 時才會用到（06:00 校正時段）
+          # ✅ 寫入 Sheet 必備
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
-
-          # ✅ 取消掃描開關（Actions Variables 設 ODIN_CANCEL_SCAN=1）
-          ODIN_CANCEL_SCAN: ${{ vars.ODIN_CANCEL_SCAN }}
-
-          # ✅ 可選：取消掃描要抓哪些狀態（沒設就走 repo 預設）
-          ODIN_CANCEL_ORDER_STATUS: ${{ vars.ODIN_CANCEL_ORDER_STATUS }}
-
-          # ✅ 可選：取消判斷字典（⚠️ 若 vars 沒設，會是空字串；下面會做保護）
-          ODIN_CANCEL_STATUS_VAR: ${{ vars.ODIN_CANCEL_STATUS }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
-
-          # ✅ vars 若沒設會是空字串：只有「有值」才覆蓋 job env 預設
-          if [ -n "${ODIN_CANCEL_STATUS_VAR:-}" ]; then
-            export ODIN_CANCEL_STATUS="${ODIN_CANCEL_STATUS_VAR}"
-            echo "Override ODIN_CANCEL_STATUS from vars."
-          else
-            echo "Use default ODIN_CANCEL_STATUS from job env."
-          fi
 
           # ✅ 若未指定 ODIN_YEAR，預設抓「台北時區今年整年」
           if [ -z "${ODIN_YEAR:-}" ]; then
@@ -126,30 +114,25 @@ jobs:
             echo "Use ODIN_YEAR from env/secrets: ${ODIN_YEAR}"
           fi
 
-          # ✅ 依「觸發時段」覆寫策略
-          # - 00:00 / 12:00 / 18:00：增量更新 + 只寫 JSON（不寫 Sheet）
-          # - 06:00：校正（全量）+ 寫 Sheet（鏡像）
+          # ✅ 保留你原本的排程策略：06:00 全量校正，其餘時段增量
+          # （但不論何時段，都會寫入 Sheet，因為 ODIN_WRITE_SHEET=1 已固定）
           if [ "${{ github.event_name }}" = "schedule" ]; then
             case "${{ github.event.schedule }}" in
               "0 22 * * *")
-                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync + write sheet"
-                export ODIN_CHANGED_ONLY=0
+                echo "Mode: CALIBRATE (06:00 Asia/Taipei) → full sync"
+                ODIN_CHANGED_ONLY=0
+                export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=0" >> $GITHUB_ENV
-
-                export ODIN_WRITE_SHEET=1
-                echo "ODIN_WRITE_SHEET=1" >> $GITHUB_ENV
                 ;;
               *)
-                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only + JSON only"
-                export ODIN_CHANGED_ONLY=1
+                echo "Mode: INCREMENTAL (00:00/12:00/18:00 Asia/Taipei) → changed-only"
+                ODIN_CHANGED_ONLY=1
+                export ODIN_CHANGED_ONLY
                 echo "ODIN_CHANGED_ONLY=1" >> $GITHUB_ENV
-
-                export ODIN_WRITE_SHEET=0
-                echo "ODIN_WRITE_SHEET=0" >> $GITHUB_ENV
                 ;;
             esac
           else
-            echo "Mode: MANUAL → keep repo defaults (ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset})"
+            echo "Mode: MANUAL → keep ODIN_CHANGED_ONLY=${ODIN_CHANGED_ONLY:-unset}"
           fi
 
           echo "ODIN_YEAR=${ODIN_YEAR:-unset}"
@@ -164,29 +147,19 @@ jobs:
       - name: Commit JSON to repo (data/odin/latest)
         if: success()
         run: |
-          set -e
-
           echo "Preview data/odin/latest:"
           ls -al data/odin/latest || true
 
-          # 只提交 data/odin/latest 的變更
-          if [ -z "$(git status --porcelain data/odin/latest)" ]; then
+          if [ -n "$(git status --porcelain data/odin/latest)" ]; then
+            git config user.name "odin-sync-bot"
+            git config user.email "odin-sync-bot@users.noreply.github.com"
+
+            git add data/odin/latest
+            git commit -m "chore(odin): update latest JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
+            git push
+          else
             echo "No data changes to commit."
-            exit 0
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 避免 schedule/手動並發造成 push 衝突（concurrency 已降低機率，但再保險）
-          git pull --rebase
-
-          git add data/odin/latest
-
-          TS=$(date '+%Y-%m-%d %H:%M:%S %z')
-          git commit -m "chore(odin): update latest JSON (${TS})"
-
-          git push
 
       # ✅ 成功才修剪：只保留「系統對照必需」的檔案，讓 cache 保持瘦身
       - name: Prune out (success only, keep key files)
@@ -195,6 +168,7 @@ jobs:
           echo "Before prune:"
           ls -al out || true
 
+          # ✅ 保留：snapshot + 主要輸出 + 鑑識用 raw（避免追 bug 沒證據）
           find out -type f \
             ! -name "orders_last_snapshot_"'*'".json" \
             ! -name "orders_sheet_ready_"'*'".json" \
