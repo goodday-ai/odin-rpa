@@ -141,11 +141,13 @@ jobs:
           echo "Before prune:"
           ls -al out || true
 
-          # ✅ 只保留：snapshot（每館一份）+ 你可能會用到的主要輸出（有就留，沒有也無妨）
+          # ✅ 保留：snapshot + 主要輸出 + 鑑識用 raw（避免追 bug 沒證據）
           find out -type f \
             ! -name "orders_last_snapshot_"'*'".json" \
-            ! -name "orders_sheet_ready.json" \
-            ! -name "gas_payload.json" \
+            ! -name "orders_sheet_ready_"'*'".json" \
+            ! -name "orders_sheet_ready_changed_"'*'".json" \
+            ! -name "orders_calendar_list_raw_"'*'".json" \
+            ! -name "orders_calendar_list_cancel_"'*'".json" \
             -delete
 
           echo "After prune:"
