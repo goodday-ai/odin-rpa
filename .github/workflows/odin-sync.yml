@@ -73,13 +73,23 @@ jobs:
           mkdir -p data/odin/latest
           mkdir -p data/odin/cache
 
+      # ✅ out 快照 cache（讓增量 diff 有基底）
       - name: Restore snapshot cache
         uses: actions/cache@v4
         with:
           path: out
-          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
-            odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-
+            odin-snapshot-${{ runner.os }}-
+
+      # ✅ Playwright 瀏覽器 cache（避免每次重抓）
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-chromium-
 
       - name: Install deps
         run: npm ci
@@ -142,12 +152,21 @@ jobs:
           git config user.name "odin-sync-bot"
           git config user.email "odin-sync-bot@users.noreply.github.com"
 
-          # ✅ 切到資料分支（不存在就新建），只帶上目前 workspace 變更
-          git checkout -B "${ODIN_DATA_BRANCH}"
+          # ✅ 用 orphan 分支確保只推 data/odin（不帶入 repo 其他檔案，也不會把變更搞丟）
+          BR="${ODIN_DATA_BRANCH}"
 
+          git fetch origin "${BR}" || true
+          git switch --orphan "${BR}"
+
+          # 清掉 index/追蹤檔，避免把整個 repo 一起 commit
+          git rm -r --cached . >/dev/null 2>&1 || true
+
+          # 只加入 data/odin
           git add data/odin
           git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
-          git push -u origin "${ODIN_DATA_BRANCH}"
+
+          # 強推更新 orphan 分支（這分支就是資料專用）
+          git push -f origin "${BR}"
 
       - name: Prune out (success only, keep key files)
         if: success()
@@ -171,7 +190,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out
-          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}
 
       - name: Upload artifacts (failure only)
         if: failure()
