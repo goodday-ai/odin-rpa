@@ -84,6 +84,16 @@ jobs:
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
+
+          # ✅ 新增：取消掃描開關（你在 Actions Variables 設 ODIN_CANCEL_SCAN=1）
+          ODIN_CANCEL_SCAN: ${{ vars.ODIN_CANCEL_SCAN }}
+
+          # ✅ 可選：取消掃描要抓哪些狀態（沒設就走 repo 預設）
+          ODIN_CANCEL_ORDER_STATUS: ${{ vars.ODIN_CANCEL_ORDER_STATUS }}
+
+          # ✅ 可選：取消判斷字典（你 workflow 這邊已有預設，但也可從 vars 統一）
+          ODIN_CANCEL_STATUS: ${{ vars.ODIN_CANCEL_STATUS }}
+          
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
