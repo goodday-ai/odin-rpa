@@ -3,41 +3,36 @@
 require("dotenv").config();
 const { test, expect } = require("@playwright/test");
 const fs = require("fs");
+const path = require("path");
 const { format, addDays, parseISO, isValid } = require("date-fns");
 
 /**
  * ✅ 功能（多館別輪巡版）：
  * - Playwright 登入 Owlting 後台 → 捕捉 Bearer
- * - 方法二：用 Bearer 列出帳號可管理的所有管別（hotelId / 名稱）
+ * - 列出可管理館別（hotelId / 名稱）
  * - 支援 ODIN_HOTEL_IDS=5720,6323,... 逐館輪巡
  * - 逐館打 calendar_list → 產出 sheet-ready JSON（每館獨立輸出檔）
- * - ✅ 策略一：每館產出後立即 POST 到 GAS Web App → 寫入 Google Sheet（依入住年份建分頁、訂單編號 upsert）
- *
- * ✅ 升級點（對應你截圖）：
- * - ✅ 全年度模式：ODIN_YEAR=2026 → during_checkin_date=2026-01-01,2026-12-31
- * - ✅ 訂單狀態：ODIN_ORDER_STATUS=normal（UI「已成立」常見對應 normal）
- * - ✅ 排序：年度模式預設 order_by=id + sort_by=asc（可用 env 覆寫）
- * - ✅ 自動翻頁：依 pagination.total_pages 把所有頁抓完（limit=200 減少頁數）
+ * - ✅ 寫入 Google Sheet（GAS Web App）→ 依入住年份建分頁、訂單編號 upsert
  *
  * ✅ 取消單刪除（重要）：
  * - 第一輪常用 ODIN_ORDER_STATUS=normal → API 多半不會回傳取消單
- * - ✅ 新增第二輪掃描：ODIN_CANCEL_SCAN=1 時，會用 ODIN_CANCEL_ORDER_STATUS 清單再抓一次取消單
+ * - ✅ 新增第二輪掃描：ODIN_CANCEL_SCAN=1 時，用 ODIN_CANCEL_ORDER_STATUS 清單再抓一次取消單
  * - 只收集 cancelledOrderNos，並一併 POST 給 GAS 讓 GAS 刪掉 Sheet 舊資料
  *
- * ✅ SSOT（Repo JSON 鏡像）：
- * - 每館輸出的 out/orders_sheet_ready_<hotelId>.json 會同步複製到 data/odin/latest/
- * - 用於「不依賴 Google API」的快取/鏡像來源（包含電話）
+ * ✅ 本次新增：Order Detail 快取（減少 API 重複打）
+ * - 目的：plan_name(專案名稱) / room_config_name(房型) / phone(電話) 這三項「綁訂單編號、極少變動」
+ * - 作法：
+ *   1) 每館別維護一份快取：data/odin/cache/detail_cache_<hotelId>.json
+ *   2) 若訂單編號已存在快取 → 不打 detail，直接用快取補欄位
+ *   3) 若訂單編號不在快取 → 才打 detail，並寫回快取（commit 回 repo）
  *
- * ✅ 重要輸出（全部放在 out/）：
- * - out/odin_me_raw.json
- * - out/odin_hotels_list_raw.json
- * - out/odin_hotels_candidates.json
- * - out/orders_calendar_list_raw_<hotelId>_p<page>.json（每頁都留存，方便你追查）
- * - out/orders_calendar_list_cancel_<hotelId>_<status>_p<page>.json（取消掃描用）
+ * ✅ 重要輸出（out/）：
  * - out/orders_sheet_ready_<hotelId>.json
- * - out/orders_sheet_ready_changed_<hotelId>.json（ODIN_CHANGED_ONLY=1）
  * - out/orders_last_snapshot_<hotelId>.json（每館獨立）
- * - out/diag_no_bearer.png（若 Bearer 抓不到）
+ *
+ * ✅ SSOT（repo 內）：
+ * - data/odin/latest/orders_sheet_ready_<hotelId>.json（包含電話）
+ * - data/odin/cache/detail_cache_<hotelId>.json（detail 快取）
  */
 
 test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", async ({ page }) => {
@@ -103,7 +98,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
 
-  const fetchDetail = String(process.env.ODIN_FETCH_DETAIL || "1") === "1"; // ✅ 取訂單 detail 補「專案名稱(方案/Plan)」
+  // ✅ 是否要打 detail 補欄位（預設開）
+  const fetchDetail = String(process.env.ODIN_FETCH_DETAIL || "1") === "1";
   const detailThrottleMsRaw = Number(process.env.ODIN_DETAIL_THROTTLE_MS || "0");
   const detailThrottleMs = Number.isFinite(detailThrottleMsRaw) ? Math.max(0, Math.min(3000, detailThrottleMsRaw)) : 0;
 
@@ -111,13 +107,15 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
 
   // ✅ 第二輪：取消單掃描（只收 cancelledOrderNos）
-  // - 只有開 ODIN_CANCEL_SCAN=1 才會跑
-  // - 例：ODIN_CANCEL_ORDER_STATUS=cancelled,void,invalid
   const cancelScan = String(process.env.ODIN_CANCEL_SCAN || "0") === "1";
   const cancelOrderStatusList = String(process.env.ODIN_CANCEL_ORDER_STATUS || "cancelled,void,invalid")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+  // ✅ Detail Cache：是否強制刷新（預設不刷新，只打新訂單）
+  // - ODIN_DETAIL_FORCE_REFRESH=1：不管有沒有快取都重打（一般不用）
+  const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
@@ -228,6 +226,36 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return `${outDir}/orders_last_snapshot_${hotelId}.json`;
   }
 
+  // ✅ SSOT 路徑：latest + cache
+  const ssotLatestDir = "data/odin/latest";
+  const ssotCacheDir = "data/odin/cache";
+
+  function ensureDirSafe(p) {
+    try { fs.mkdirSync(p, { recursive: true }); } catch (_) {}
+  }
+
+  function cachePathFor(hotelId) {
+    return path.join(ssotCacheDir, `detail_cache_${hotelId}.json`);
+  }
+
+  function readJsonFileSafe(p, fallback) {
+    try {
+      if (!fs.existsSync(p)) return fallback;
+      const s = fs.readFileSync(p, "utf8");
+      const j = JSON.parse(s);
+      return j && typeof j === "object" ? j : fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function writeJsonFileSafe(p, obj) {
+    try {
+      ensureDirSafe(path.dirname(p));
+      fs.writeFileSync(p, JSON.stringify(obj, null, 2), "utf8");
+    } catch (_) {}
+  }
+
   console.log(
     "🧾 sheet write mode:",
     writeSheet ? "ON" : "OFF",
@@ -246,7 +274,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| sort_by=",
     sortBy || "(empty)",
     "| cancelScan=",
-    cancelScan ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF"
+    cancelScan ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
+    "| detailCache=",
+    fetchDetail ? (detailForceRefresh ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF"
   );
 
   const loginUrl =
@@ -323,7 +353,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   );
 
   // -----------------------------
-  // 3) ✅ 方法二：列出可管理的管別（hotelId）
+  // 3) ✅ 列出可管理館別（hotelId）
   // -----------------------------
   function pushCandidate(out, obj) {
     if (!obj || typeof obj !== "object") return;
@@ -372,10 +402,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (!d) return "";
 
     const rooms = Array.isArray(d.rooms) ? d.rooms : [];
-    const planNames = _uniqNonEmpty_(rooms.map(r => r && r.plan_name ? r.plan_name : ""));
+    const planNames = _uniqNonEmpty_(rooms.map((r) => (r && r.plan_name ? r.plan_name : "")));
     if (planNames.length) return planNames.join("｜");
 
-    const roomNames = _uniqNonEmpty_(rooms.map(r => r && r.room_name ? r.room_name : ""));
+    const roomNames = _uniqNonEmpty_(rooms.map((r) => (r && r.room_name ? r.room_name : "")));
     if (roomNames.length) return roomNames.join("｜");
 
     return "";
@@ -386,10 +416,25 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (!d) return "";
 
     const rooms = Array.isArray(d.rooms) ? d.rooms : [];
-    const cfgNames = _uniqNonEmpty_(rooms.map(r => r && r.room_config_name ? r.room_config_name : ""));
+    const cfgNames = _uniqNonEmpty_(rooms.map((r) => (r && r.room_config_name ? r.room_config_name : "")));
     if (cfgNames.length) return cfgNames.join("｜");
 
     return "";
+  }
+
+  function extractPhoneFromDetail(detailJson) {
+    const d = detailJson && detailJson.data ? detailJson.data : null;
+    if (!d) return "";
+
+    // 盡量吃常見欄位（不同帳號/語系可能不一樣）
+    const v =
+      (d.customer && (d.customer.phone || d.customer.mobile || d.customer.tel)) ||
+      d.phone ||
+      d.mobile ||
+      d.tel ||
+      "";
+
+    return String(v || "").trim();
   }
 
   async function fetchOrderDetail(hotelId, orderSerial, headers) {
@@ -496,6 +541,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   }
 
   // ✅ 電話正規化：
+  // - 去除：所有空格、以及「-」
+  // - 開頭是 +886 / 886：轉成 0 開頭
+  // - 若轉換後變成 00 開頭：刪掉第一個 0（避免 00xxxxxxxx）
   function normalizePhone(raw) {
     let s = String(raw == null ? "" : raw).trim();
     if (!s) return "";
@@ -587,15 +635,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
-    console.log(
-      "📤 GAS payload:",
-      hotelId,
-      "| rows =",
-      payload && payload.rows ? payload.rows.length : 0,
-      "| cancelNos =",
-      payload && payload.cancelledOrderNos ? payload.cancelledOrderNos.length : 0
-    );
-
     let resp;
     try {
       resp = await page.request.post(gasUrl, {
@@ -677,8 +716,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const cancelledSkipped = { count: 0 };
 
-    const detailCache = new Map();
-    const roomTypeCache = new Map();
+    // ✅ 讀入「每館別」detail 快取（repo SSOT）
+    ensureDirSafe(ssotCacheDir);
+    const cachePath = cachePathFor(hotelId);
+    const detailCacheMap = readJsonFileSafe(cachePath, {});
+    const detailCacheHit = { count: 0 };
+    const detailCacheMiss = { count: 0 };
+    const detailCacheWrite = { count: 0 };
 
     // -----------------------------
     // ✅ 第一輪：依 ODIN_ORDER_STATUS 抓「主要訂單」
@@ -722,31 +766,62 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           continue;
         }
 
+        // ✅ 先拿 list 內能拿到的值
         let projectName = pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]);
+        let roomType = pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]);
+        let phone = normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]));
 
-        let roomType = "";
+        // =======================================================
+        // ✅ detail 補齊：先查 cache，再決定是否要打 detail
+        // - 預設：只打「快取不存在」的新訂單
+        // - 若 ODIN_DETAIL_FORCE_REFRESH=1：無視快取，全部重打（一般不用）
+        // =======================================================
         if (fetchDetail) {
           const key = String(orderSerial);
 
-          if (detailCache.has(key)) projectName = detailCache.get(key);
-          if (roomTypeCache.has(key)) roomType = roomTypeCache.get(key);
+          const cached = detailCacheMap && detailCacheMap[key] ? detailCacheMap[key] : null;
+          const cacheOk = cached && typeof cached === "object";
 
-          if (!detailCache.has(key) || !roomTypeCache.has(key)) {
+          if (cacheOk && !detailForceRefresh) {
+            // ✅ 命中快取：不打 detail
+            detailCacheHit.count++;
+
+            if (cached.projectName) projectName = String(cached.projectName);
+            if (cached.roomType) roomType = String(cached.roomType);
+            if (cached.phone) phone = normalizePhone(cached.phone);
+          } else {
+            // ✅ 未命中或強刷：打 detail
+            detailCacheMiss.count++;
+
             if (detailThrottleMs > 0) await sleep(detailThrottleMs);
 
             const detailRes = await fetchOrderDetail(hotelId, key, baseHeaders);
             if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
               const extractedProject = extractProjectNameFromDetail(detailRes.json);
               const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
+              const extractedPhone = extractPhoneFromDetail(detailRes.json);
 
               if (extractedProject) projectName = extractedProject;
               if (extractedRoomType) roomType = extractedRoomType;
+              if (extractedPhone) phone = normalizePhone(extractedPhone);
 
-              detailCache.set(key, projectName || "");
-              roomTypeCache.set(key, roomType || "");
+              detailCacheMap[key] = {
+                projectName: projectName || "",
+                roomType: roomType || "",
+                phone: phone || "",
+                updatedAt: taipeiTodayYMD()
+              };
+              detailCacheWrite.count++;
             } else {
-              detailCache.set(key, projectName || "");
-              roomTypeCache.set(key, roomType || "");
+              // 打不到也要落一筆，避免每次都狂打同一張單（但保留可覆寫）
+              detailCacheMap[key] = {
+                projectName: projectName || "",
+                roomType: roomType || "",
+                phone: phone || "",
+                updatedAt: taipeiTodayYMD(),
+                note: "detail_fetch_failed"
+              };
+              detailCacheWrite.count++;
             }
           }
         }
@@ -757,13 +832,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
           退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
           姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
-          房型: roomType || pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
-          專案名稱: projectName,
+          房型: roomType || "",
+          專案名稱: projectName || "",
           訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
           已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
           剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
           UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
-          電話: normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]))
+          電話: phone || ""
         };
 
         if (!row.入住日期 || !row.退房日期) continue;
@@ -813,6 +888,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       }
     }
 
+    const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
+
+    // ✅ 先落 out/
     const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
     fs.writeFileSync(
       sheetReadyPath,
@@ -820,24 +898,18 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       "utf8"
     );
 
-    // ✅ SSOT：同步寫一份到 repo（包含電話）
-    const dataDir = "data/odin/latest";
-    try { fs.mkdirSync(dataDir, { recursive: true }); } catch (_) {}
+    // ✅ SSOT：同步寫到 repo（latest）
+    ensureDirSafe(ssotLatestDir);
+    try { fs.copyFileSync(sheetReadyPath, path.join(ssotLatestDir, `orders_sheet_ready_${hotelId}.json`)); } catch (_) {}
 
-    try {
-      fs.copyFileSync(sheetReadyPath, `${dataDir}/orders_sheet_ready_${hotelId}.json`);
-    } catch (e) {
-      console.log("⚠️ write SSOT failed:", hotelId, String(e && e.message ? e.message : e));
-    }
-
-    const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
-    console.log("🧾 cancelScan:", cancelScan ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
+    // ✅ SSOT：寫回 detail cache（repo）
+    writeJsonFileSafe(cachePath, detailCacheMap);
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
-    if (cancelScan) console.log("🧹 cancelled scanned:", hotelId, "unique =", uniqueCancelled.length);
+    console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
+    console.log("🧾 cancelScan:", cancelScan ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
 
-    // ✅ 提醒：鏡像模式下 ODIN_WRITE_SHEET=0，這段會自動略過（不打 Google）
     await syncToSheetOrThrow(
       {
         token: sheetToken,
