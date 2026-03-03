@@ -19,11 +19,17 @@ const { format, addDays, parseISO, isValid } = require("date-fns");
  * - ✅ 排序：年度模式預設 order_by=id + sort_by=asc（可用 env 覆寫）
  * - ✅ 自動翻頁：依 pagination.total_pages 把所有頁抓完（limit=200 減少頁數）
  *
+ * ✅ 取消單刪除（重要）：
+ * - 第一輪常用 ODIN_ORDER_STATUS=normal → API 多半不會回傳取消單
+ * - ✅ 新增第二輪掃描：ODIN_CANCEL_SCAN=1 時，會用 ODIN_CANCEL_ORDER_STATUS 清單再抓一次取消單
+ * - 只收集 cancelledOrderNos，並一併 POST 給 GAS 讓 GAS 刪掉 Sheet 舊資料
+ *
  * ✅ 重要輸出（全部放在 out/）：
  * - out/odin_me_raw.json
  * - out/odin_hotels_list_raw.json
  * - out/odin_hotels_candidates.json
  * - out/orders_calendar_list_raw_<hotelId>_p<page>.json（每頁都留存，方便你追查）
+ * - out/orders_calendar_list_cancel_<hotelId>_<status>_p<page>.json（取消掃描用）
  * - out/orders_sheet_ready_<hotelId>.json
  * - out/orders_sheet_ready_changed_<hotelId>.json（ODIN_CHANGED_ONLY=1）
  * - out/orders_last_snapshot_<hotelId>.json（每館獨立）
@@ -99,6 +105,15 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   // ✅ 策略一（寫入 Sheet）：GAS Web App
   const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
+
+  // ✅ 第二輪：取消單掃描（只收 cancelledOrderNos）
+  // - 只有開 ODIN_CANCEL_SCAN=1 才會跑
+  // - 例：ODIN_CANCEL_ORDER_STATUS=cancelled,void,invalid
+  const cancelScan = String(process.env.ODIN_CANCEL_SCAN || "0") === "1";
+  const cancelOrderStatusList = String(process.env.ODIN_CANCEL_ORDER_STATUS || "cancelled,void,invalid")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
@@ -225,7 +240,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| order_by=",
     orderBy || "(empty)",
     "| sort_by=",
-    sortBy || "(empty)"
+    sortBy || "(empty)",
+    "| cancelScan=",
+    cancelScan ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF"
   );
 
   const loginUrl =
@@ -332,8 +349,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   // =======================================================
   // ✅ 訂單 detail：取真實「方案/Plan 名稱」當作「專案名稱」
-  // - 你在列表看到的 Booking.com / 手動訂單 / 官網訂單，多半是 order_source（訂單來源）
-  // - 真正你要的「獨享包棟 / 2F 包棟 / 3F 包棟 / Booking」通常在 detail.rooms[].plan_name
   // =======================================================
   function _uniqNonEmpty_(arr) {
     const out = [];
@@ -352,12 +367,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     const d = detailJson && detailJson.data ? detailJson.data : null;
     if (!d) return "";
 
-    // rooms: [{ plan_name, room_name, ... }]
     const rooms = Array.isArray(d.rooms) ? d.rooms : [];
     const planNames = _uniqNonEmpty_(rooms.map(r => r && r.plan_name ? r.plan_name : ""));
     if (planNames.length) return planNames.join("｜");
 
-    // 後備：room_name（若 plan_name 真的沒有）
     const roomNames = _uniqNonEmpty_(rooms.map(r => r && r.room_name ? r.room_name : ""));
     if (roomNames.length) return roomNames.join("｜");
 
@@ -374,7 +387,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     return "";
   }
-
 
   async function fetchOrderDetail(hotelId, orderSerial, headers) {
     const url = `https://www.owlting.com/booking/v2/admin/hotels/${hotelId}/orders/${encodeURIComponent(orderSerial)}/detail?lang=zh_TW&_=${Date.now()}`;
@@ -448,6 +460,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // -----------------------------
   // 4) 共用工具：calendar_list → sheet-ready
   // -----------------------------
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   function pick(obj, keys) {
     for (const k of keys) {
       if (obj && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) return obj[k];
@@ -475,7 +491,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (v == null) return "";
     return String(v).replace(/,/g, "").trim();
   }
-  
+
   // ✅ 電話正規化：
   // - 去除：所有空格、以及「-」
   // - 開頭是 +886 / 886：轉成 0 開頭
@@ -484,21 +500,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     let s = String(raw == null ? "" : raw).trim();
     if (!s) return "";
 
-    // 移除空格與 -
     s = s.replace(/[\s-]+/g, "");
 
-    // +886xxxxxxx -> 0xxxxxxx
     if (s.startsWith("+886")) s = "0" + s.slice(4);
-
-    // 886xxxxxxx -> 0xxxxxxx
     if (s.startsWith("886")) s = "0" + s.slice(3);
 
-    // 00xxxxxxxx -> 0xxxxxxxx
     if (s.startsWith("00")) s = s.slice(1);
 
     return s;
   }
-  
+
   // ✅ 取消單判斷：只看「明確欄位/旗標」
   function getStatusText(it) {
     const v = pick(it, [
@@ -627,15 +638,17 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return `${format(from, "yyyy-MM-dd")},${format(to, "yyyy-MM-dd")}`;
   }
 
-  function buildListUrl(hotelId, pageNo, rangeStr) {
-    const listLimit = 200; // 盡量大，減少分頁數
+  function buildListUrl(hotelId, pageNo, rangeStr, orderStatusOverride) {
+    const listLimit = 200;
+
+    const status = orderStatusOverride != null ? String(orderStatusOverride).trim() : String(orderStatus || "").trim();
 
     return (
       `https://www.owlting.com/booking/v2/admin/hotels/${encodeURIComponent(hotelId)}/orders/calendar_list` +
       `?lang=${encodeURIComponent(lang)}` +
       `&limit=${listLimit}` +
       `&page=${encodeURIComponent(String(pageNo))}` +
-      (orderStatus ? `&order_status=${encodeURIComponent(orderStatus)}` : ``) +
+      (status ? `&order_status=${encodeURIComponent(status)}` : ``) +
       `&order_by=${encodeURIComponent(orderBy || "checkin")}` +
       (sortBy ? `&sort_by=${encodeURIComponent(sortBy)}` : ``) +
       `&during_checkin_date=${encodeURIComponent(rangeStr)}` +
@@ -654,10 +667,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
     const cancelledSkipped = { count: 0 };
 
-    // ✅ 同一筆訂單在列表可能重複出現（跨日/跨房），detail 只抓一次
     const detailCache = new Map();
     const roomTypeCache = new Map();
 
+    // -----------------------------
+    // ✅ 第一輪：依 ODIN_ORDER_STATUS 抓「主要訂單」
+    // -----------------------------
     while (pageNo <= totalPages) {
       const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
 
@@ -697,21 +712,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           continue;
         }
 
-        // ✅ 先用列表可取得的欄位當 fallback（通常是訂單來源）
         let projectName = pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]);
 
-        // ✅ 再用 detail.rooms[].plan_name 覆蓋（通常才是你真正的「專案名稱」）
-// ✅ 同時取 rooms[].room_config_name 當作「房型」（只要包棟 / 3F 這種層級，不要拼 room_name）
         let roomType = "";
         if (fetchDetail) {
           const key = String(orderSerial);
 
-          if (detailCache.has(key)) {
-            projectName = detailCache.get(key);
-          }
-          if (roomTypeCache.has(key)) {
-            roomType = roomTypeCache.get(key);
-          }
+          if (detailCache.has(key)) projectName = detailCache.get(key);
+          if (roomTypeCache.has(key)) roomType = roomTypeCache.get(key);
 
           if (!detailCache.has(key) || !roomTypeCache.has(key)) {
             if (detailThrottleMs > 0) await sleep(detailThrottleMs);
@@ -727,7 +735,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
               detailCache.set(key, projectName || "");
               roomTypeCache.set(key, roomType || "");
             } else {
-              // 失敗就維持 fallback，不中斷整批
               detailCache.set(key, projectName || "");
               roomTypeCache.set(key, roomType || "");
             }
@@ -746,7 +753,6 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
           剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
           UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
-          // ✅ 電話一律當字串（避免 0 開頭被當數字）+ 正規化（去空白/-、886 → 0）
           電話: normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]))
         };
 
@@ -757,6 +763,47 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       pageNo++;
     }
 
+    // =======================================================
+    // ✅ 第二輪（可選）：掃描取消單，只收集 cancelledOrderNos
+    // - 因為第一輪常用 order_status=normal，API 不一定回傳取消單
+    // =======================================================
+    if (cancelScan && cancelOrderStatusList.length) {
+      for (const cancelStatus of cancelOrderStatusList) {
+        let cp = 1;
+        let ctp = 1;
+
+        while (cp <= ctp) {
+          const cancelUrl = buildListUrl(hotelId, cp, rangeStr, cancelStatus);
+
+          const cancelRes = await page.request.get(cancelUrl, { headers: baseHeaders });
+          const cancelHttp = cancelRes.status();
+          const cancelJson = await cancelRes.json().catch(() => ({}));
+
+          fs.writeFileSync(
+            `${outDir}/orders_calendar_list_cancel_${hotelId}_${cancelStatus}_p${cp}.json`,
+            JSON.stringify({ url: cancelUrl, httpStatus: cancelHttp, body: cancelJson }, null, 2),
+            "utf8"
+          );
+
+          if (cancelHttp !== 200 || !cancelJson || typeof cancelJson !== "object") break;
+          if (typeof cancelJson.status === "number" && cancelJson.status !== 0) break;
+
+          const cpg = cancelJson.pagination && typeof cancelJson.pagination === "object" ? cancelJson.pagination : {};
+          const ctpRaw = cpg.total_pages != null ? Number(cpg.total_pages) : 1;
+          ctp = Number.isFinite(ctpRaw) && ctpRaw > 0 ? ctpRaw : 1;
+
+          const cancelData = Array.isArray(cancelJson.data) ? cancelJson.data : [];
+          for (const it of cancelData) {
+            const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
+            if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
+            cancelledOrderNos.push(String(orderSerial));
+          }
+
+          cp++;
+        }
+      }
+    }
+
     const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
     fs.writeFileSync(
       sheetReadyPath,
@@ -764,8 +811,11 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       "utf8"
     );
 
+    const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
+
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
+    if (cancelScan) console.log("🧹 cancelled scanned:", hotelId, "unique =", uniqueCancelled.length);
 
     await syncToSheetOrThrow(
       {
@@ -775,7 +825,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         hotelName,
         columns,
         rows,
-        cancelledOrderNos: Array.from(new Set(cancelledOrderNos)),
+        cancelledOrderNos: uniqueCancelled,
         rangeStr
       },
       hotelId,
