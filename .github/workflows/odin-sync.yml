@@ -249,8 +249,12 @@ jobs:
           echo "Preview data/odin/cache:"
           ls -al data/odin/cache || true
 
+          # ✅ 診斷 0：workspace 這次到底有沒有動到 data/odin
+          echo "=== Workspace data/odin status ==="
+          git status --porcelain data/odin || true
+
           if [ -z "$(git status --porcelain data/odin)" ]; then
-            echo "No data changes to commit."
+            echo "No data changes to commit (workspace)."
             exit 0
           fi
 
@@ -274,10 +278,27 @@ jobs:
           rsync -a --delete "data/odin/" "${WT_DIR}/data/odin/"
 
           cd "${WT_DIR}"
+
+          # ✅ 診斷 1：worktree 現在到底在哪個 commit（確認真的是 odin-data 的 HEAD）
+          echo "=== SSOT worktree HEAD ==="
+          git --no-pager log -1 --oneline || true
+
+          # ✅ ✅ 鐵證級診斷（你要的兩行核心）
+          echo "=== SSOT worktree status (porcelain) ==="
+          git status --porcelain || true
+          echo "=== SSOT worktree diff summary ==="
+          git --no-pager diff --stat || true
+
           git add data/odin
 
+          # ✅ 診斷 2：add 之後再看一次（避免你懷疑是 staging 沒吃到）
+          echo "=== SSOT staged status ==="
+          git status --porcelain || true
+          echo "=== SSOT staged diff summary ==="
+          git --no-pager diff --cached --stat || true
+
           if [ -z "$(git status --porcelain)" ]; then
-            echo "No SSOT changes after rsync."
+            echo "No SSOT changes after rsync (worktree is identical to origin)."
             cd -
             exit 0
           fi
