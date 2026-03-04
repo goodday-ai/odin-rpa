@@ -91,18 +91,7 @@ jobs:
           echo "After restore - cache:"
           ls -al data/odin/cache || true
 
-      - name: Restore snapshot cache
-        uses: actions/cache@v4
-        with:
-          path: out
-          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-
-
-      - name: Install deps
-        run: npm ci
-
-      # ✅ Playwright browsers cache（runner 每次都是新機器，但快取能避免每次重下載）
+      # ✅ Playwright browsers cache：一定要在 npm ci 之前 restore
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
@@ -112,9 +101,17 @@ jobs:
           restore-keys: |
             ms-playwright-${{ runner.os }}-
 
+      # ✅ 安裝 npm 套件時，直接禁止 Playwright 在 postinstall 自行下載 browsers
+      - name: Install deps
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      # ✅ cache miss 才裝 browsers（避免每次重下載）
+      # 注意：不帶 --with-deps 比較不會每次去動系統套件；若你確定缺依賴會炸，再加回 --with-deps
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Skip Playwright install (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
@@ -175,7 +172,6 @@ jobs:
           git config user.name "odin-sync-bot"
           git config user.email "odin-sync-bot@users.noreply.github.com"
 
-          # 先抓遠端分支（可能不存在）
           git fetch origin "${ODIN_DATA_BRANCH}" || true
 
           WT_DIR="../_odin_data_worktree"
@@ -189,7 +185,6 @@ jobs:
             git worktree add --force -b "${ODIN_DATA_BRANCH}" "${WT_DIR}"
           fi
 
-          # 只同步 data/odin（避免把整個 repo 推到資料分支）
           mkdir -p "${WT_DIR}/data/odin"
           rsync -a --delete "data/odin/" "${WT_DIR}/data/odin/"
 
@@ -203,8 +198,6 @@ jobs:
           fi
 
           git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
-
-          # 推送：分支不存在就建立；存在就更新
           git push -u origin HEAD:"${ODIN_DATA_BRANCH}"
 
           cd -
@@ -225,13 +218,6 @@ jobs:
 
           echo "After prune:"
           ls -al out || true
-
-      - name: Save snapshot cache (success only)
-        if: success()
-        uses: actions/cache@v4
-        with:
-          path: out
-          key: odin-snapshot-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: Upload artifacts (failure only)
         if: failure()
