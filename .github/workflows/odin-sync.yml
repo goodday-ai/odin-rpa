@@ -91,6 +91,43 @@ jobs:
           echo "After restore - cache:"
           ls -al data/odin/cache || true
 
+      # ✅ 補強 1：SSOT cache 健檢
+      # - 遇到 0 bytes 或非法 JSON 的 detail_cache_* → 直接刪掉，避免壞 cache 讓流程「看似成功但其實讀到髒資料」
+      - name: Validate & prune broken SSOT cache
+        run: |
+          set -e
+
+          CACHE_DIR="data/odin/cache"
+          if [ ! -d "${CACHE_DIR}" ]; then
+            echo "No ${CACHE_DIR} dir, skip."
+            exit 0
+          fi
+
+          echo "Validate SSOT cache json in ${CACHE_DIR} ..."
+          bad=0
+
+          shopt -s nullglob
+          for f in "${CACHE_DIR}"/detail_cache_*.json; do
+            # 0 bytes → 壞檔
+            if [ ! -s "${f}" ]; then
+              echo "⚠️ remove empty cache: ${f}"
+              rm -f "${f}"
+              bad=$((bad + 1))
+              continue
+            fi
+
+            # 非法 JSON → 壞檔（用 node 解析，環境保證有 node）
+            node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "${f}" >/dev/null 2>&1 || {
+              echo "⚠️ remove invalid json: ${f}"
+              rm -f "${f}"
+              bad=$((bad + 1))
+            }
+          done
+
+          echo "SSOT cache validate done. removed=${bad}"
+          echo "After validate - cache:"
+          ls -al "${CACHE_DIR}" || true
+
       # ✅ Playwright browsers cache：一定要在 npm ci 之前 restore
       - name: Cache Playwright browsers
         id: playwright-cache
@@ -154,6 +191,54 @@ jobs:
           echo "ODIN_CANCEL_ORDER_STATUS=${ODIN_CANCEL_ORDER_STATUS:-unset}"
 
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
+
+          # ✅ 補強 2：GAS 回應若有 deleteError / ok=false → 直接 fail
+          # 依你目前的輸出習慣：out 裡會有 orders_sheet_ready_*.json（或 changed 版本）
+          # 這裡掃描所有相關檔案，只要發現 error 就 exit 1
+          echo "Post-check: scan out/*sheet_ready*.json for GAS errors..."
+
+          node - <<'NODE'
+          const fs = require('fs')
+          const path = require('path')
+
+          function listFiles(dir) {
+            try { return fs.readdirSync(dir).map(f => path.join(dir, f)) } catch { return [] }
+          }
+
+          const outDir = path.resolve('out')
+          const files = listFiles(outDir).filter(f =>
+            /orders_sheet_ready_.*\.json$/.test(path.basename(f)) ||
+            /orders_sheet_ready_changed_.*\.json$/.test(path.basename(f))
+          )
+
+          let bad = []
+          for (const f of files) {
+            let txt = ''
+            try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
+            if (!txt.trim()) continue
+
+            let data
+            try { data = JSON.parse(txt) } catch { continue }
+
+            // 寬鬆掃描：只要任一層物件出現 ok=false 或 deleteError 非空字串就視為異常
+            const stack = [data]
+            while (stack.length) {
+              const cur = stack.pop()
+              if (cur && typeof cur === 'object') {
+                if (cur.ok === false) bad.push({ file: f, reason: 'ok=false' })
+                if (typeof cur.deleteError === 'string' && cur.deleteError.trim()) bad.push({ file: f, reason: `deleteError=${cur.deleteError}` })
+                for (const k of Object.keys(cur)) stack.push(cur[k])
+              }
+            }
+          }
+
+          if (bad.length) {
+            console.error('🚨 GAS error detected in out json:', bad.slice(0, 20))
+            process.exit(1)
+          }
+
+          console.log('✅ GAS error scan passed.')
+          NODE
 
       # ✅ 穩定推送：使用 worktree 處理 odin-data（不在主工作目錄切分支，避免 checkout 覆寫變更）
       - name: Publish SSOT JSON to odin-data branch (safe via worktree)
