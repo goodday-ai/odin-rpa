@@ -104,6 +104,7 @@ jobs:
 
       # ✅ Playwright browsers cache（runner 每次都是新機器，但快取能避免每次重下載）
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -112,7 +113,12 @@ jobs:
             ms-playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Skip Playwright install (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: echo "Playwright browser cache hit, skip install."
 
       - name: Run Odin sync
         env:
