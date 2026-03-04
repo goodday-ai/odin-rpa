@@ -44,7 +44,7 @@ jobs:
       ODIN_WRITE_SHEET: "1"
 
       # ✅ 強制：永遠跑取消單掃描（第二輪）
-      # ⚠️ Odin 真實 API 是 order_status=cancel
+      # ✅ Odin 真實 API：order_status=cancel
       ODIN_CANCEL_SCAN: "1"
       ODIN_CANCEL_ORDER_STATUS: "cancel"
 
@@ -52,7 +52,7 @@ jobs:
       ODIN_CHANGED_ONLY: "1"
       ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
 
-      # ✅ 把 SSOT 推到不觸發 Vercel 的分支
+      # ✅ 把 SSOT 推到不觸發 Production 的分支（你 repo 用這個當 SSOT 存放）
       ODIN_DATA_BRANCH: "odin-data"
 
     steps:
@@ -73,6 +73,24 @@ jobs:
           mkdir -p data/odin/latest
           mkdir -p data/odin/cache
 
+      # ✅ 關鍵：排程永遠從預設分支起跑，先把 odin-data 的最新 JSON 帶回 workspace
+      # 目的：避免 detail cache 每次被重置，或把既有 JSON 誤刪
+      - name: Restore latest SSOT data from odin-data branch
+        run: |
+          git fetch origin "${ODIN_DATA_BRANCH}" || true
+
+          if git show-ref --verify --quiet "refs/remotes/origin/${ODIN_DATA_BRANCH}"; then
+            git checkout "origin/${ODIN_DATA_BRANCH}" -- data/odin || true
+            echo "Restored data/odin from origin/${ODIN_DATA_BRANCH}."
+          else
+            echo "origin/${ODIN_DATA_BRANCH} not found yet; start with local data/odin."
+          fi
+
+          echo "After restore - latest:"
+          ls -al data/odin/latest || true
+          echo "After restore - cache:"
+          ls -al data/odin/cache || true
+
       - name: Restore snapshot cache
         uses: actions/cache@v4
         with:
@@ -83,6 +101,15 @@ jobs:
 
       - name: Install deps
         run: npm ci
+
+      # ✅ Playwright browsers cache（runner 每次都是新機器，但快取能避免每次重下載）
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ms-playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
@@ -125,8 +152,8 @@ jobs:
 
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
-      # ✅ 把 data/odin/* 推到 odin-data 分支，避免 Vercel 因 main commit 連續部署而 blocked
-      - name: Commit SSOT JSON to odin-data branch
+      # ✅ 穩定推送：使用 worktree 處理 odin-data（不在主工作目錄切分支，避免 checkout 覆寫變更）
+      - name: Publish SSOT JSON to odin-data branch (safe via worktree)
         if: success()
         run: |
           echo "Preview data/odin/latest:"
@@ -142,12 +169,39 @@ jobs:
           git config user.name "odin-sync-bot"
           git config user.email "odin-sync-bot@users.noreply.github.com"
 
-          # ✅ 切到資料分支（不存在就新建），只帶上目前 workspace 變更
-          git checkout -B "${ODIN_DATA_BRANCH}"
+          # 先抓遠端分支（可能不存在）
+          git fetch origin "${ODIN_DATA_BRANCH}" || true
 
+          WT_DIR="../_odin_data_worktree"
+          rm -rf "${WT_DIR}" || true
+
+          if git show-ref --verify --quiet "refs/remotes/origin/${ODIN_DATA_BRANCH}"; then
+            echo "Worktree: checkout existing origin/${ODIN_DATA_BRANCH}"
+            git worktree add --force "${WT_DIR}" "origin/${ODIN_DATA_BRANCH}"
+          else
+            echo "Worktree: create new branch ${ODIN_DATA_BRANCH}"
+            git worktree add --force -b "${ODIN_DATA_BRANCH}" "${WT_DIR}"
+          fi
+
+          # 只同步 data/odin（避免把整個 repo 推到資料分支）
+          mkdir -p "${WT_DIR}/data/odin"
+          rsync -a --delete "data/odin/" "${WT_DIR}/data/odin/"
+
+          cd "${WT_DIR}"
           git add data/odin
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No SSOT changes after rsync."
+            cd -
+            exit 0
+          fi
+
           git commit -m "chore(odin): update SSOT JSON ($(date '+%Y-%m-%d %H:%M:%S %z'))"
-          git push -u origin "${ODIN_DATA_BRANCH}"
+
+          # 推送：分支不存在就建立；存在就更新
+          git push -u origin HEAD:"${ODIN_DATA_BRANCH}"
+
+          cd -
 
       - name: Prune out (success only, keep key files)
         if: success()
