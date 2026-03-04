@@ -910,20 +910,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
     console.log("🧾 cancelScan:", cancelScan ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
 
-    await syncToSheetOrThrow(
-      {
-        token: sheetToken,
-        spreadsheetId,
-        hotelId,
-        hotelName,
-        columns,
-        rows,
-        cancelledOrderNos: uniqueCancelled,
-        rangeStr
-      },
-      hotelId,
-      hotelName
-    );
+    let rowsToSync = rows;
 
     if (changedOnly) {
       const snapshotPath = snapshotPathFor(hotelId);
@@ -948,8 +935,26 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         "utf8"
       );
 
+      rowsToSync = out;
       console.log("✅ changedOnly=1:", hotelId, "changed rows =", out.length, "snapshot =", snapshotPath);
     }
+
+    await syncToSheetOrThrow(
+      {
+        token: sheetToken,
+        spreadsheetId,
+        hotelId,
+        hotelName,
+        columns,
+        rows: rowsToSync,
+        cancelledOrderNos: uniqueCancelled,
+        rangeStr
+      },
+      hotelId,
+      hotelName
+    );
+
+    console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")");
 
     if (!rows.length) {
       console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
