@@ -40,5 +40,17 @@
     "roomType": "default_room_config",
     "phone": "0971226275",
     "updatedAt": "2026-03-04"
+  },
+  "OBE78380672226030401": {
+    "projectName": "連住專案",
+    "roomType": "default_room_config",
+    "phone": "0983381719",
+    "updatedAt": "2026-03-04"
+  },
+  "OBE39970672226030402": {
+    "projectName": "連住專案",
+    "roomType": "default_room_config",
+    "phone": "0937841007",
+    "updatedAt": "2026-03-04"
   }
 }
