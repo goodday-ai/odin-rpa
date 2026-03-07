@@ -158,7 +158,7 @@ jobs:
         env:
           ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
-          ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS }}
+          ODIN_HOTEL_IDS: ${{ secrets.ODIN_HOTEL_IDS || vars.ODIN_HOTEL_IDS }}
 
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
