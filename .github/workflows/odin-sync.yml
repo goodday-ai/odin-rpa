@@ -50,7 +50,8 @@ jobs:
 
       # ✅ 增量（預設開）：只送變動 rows，降低 GAS 寫入量
       ODIN_CHANGED_ONLY: "1"
-      ODIN_SNAPSHOT_PATH: "out/orders_last_snapshot_{hotelId}.json"
+      # ✅ 快照寫到 data/odin（會被 restore/publish），避免每次 workflow 都重新全量上傳
+      ODIN_SNAPSHOT_PATH: "data/odin/latest/orders_last_snapshot_{hotelId}.json"
 
       # ✅ 把 SSOT 推到不觸發 Production 的分支（你 repo 用這個當 SSOT 存放）
       ODIN_DATA_BRANCH: "odin-data"
@@ -249,6 +250,7 @@ jobs:
           rsync -av \
             --include="orders_sheet_ready_*.json" \
             --include="orders_sheet_ready_changed_*.json" \
+            --include="orders_last_snapshot_*.json" \
             --exclude="*" \
             out/ \
             data/odin/latest/
