@@ -1,7 +1,3 @@
-# odin-rpa
-
-Owlting 房況抓取 Worker（Playwright + GitHub Actions）
-
 ## GAS Web App 範本
 
 本專案提供可直接貼到 Apps Script 的同步腳本：
