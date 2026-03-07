@@ -540,6 +540,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return String(v).replace(/,/g, "").trim();
   }
 
+  function toNumberSafe(v) {
+    const s = toAmount(v);
+    if (!s) return NaN;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   // ✅ 電話正規化：
   // - 去除：所有空格、以及「-」
   // - 開頭是 +886 / 886：轉成 0 開頭
@@ -826,6 +833,28 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           }
         }
 
+        const totalAmountRaw = pick(it, ["total", "total_amount", "amount", "price", "order_total", "order_amount"]);
+        const paidAmountRaw = pick(it, ["paid", "paid_amount", "total_paid", "paid_total", "received_amount", "received"]);
+        const unpaidAmountRaw = pick(it, ["unpaid", "remain", "unpaid_amount", "remaining_amount", "balance", "balance_due"]);
+
+        const totalAmount = toAmount(totalAmountRaw);
+
+        let paidAmount = toAmount(paidAmountRaw);
+        let unpaidAmount = toAmount(unpaidAmountRaw);
+
+        // 盡量補齊金額欄位：若 API 只給了其中兩個值，推算第三個
+        const totalN = toNumberSafe(totalAmountRaw);
+        const paidN = toNumberSafe(paidAmountRaw);
+        const unpaidN = toNumberSafe(unpaidAmountRaw);
+
+        if (!paidAmount && Number.isFinite(totalN) && Number.isFinite(unpaidN)) {
+          paidAmount = String(Math.max(0, totalN - unpaidN));
+        }
+
+        if (!unpaidAmount && Number.isFinite(totalN) && Number.isFinite(paidN)) {
+          unpaidAmount = String(Math.max(0, totalN - paidN));
+        }
+
         const row = {
           訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
           訂單編號: String(orderSerial),
@@ -834,9 +863,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
           姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
           房型: roomType || "",
           專案名稱: projectName || "",
-          訂單款項: toAmount(pick(it, ["total", "total_amount", "amount", "price"])),
-          已收金額: toAmount(pick(it, ["paid", "paid_amount"])),
-          剩餘尾款: toAmount(pick(it, ["unpaid", "remain", "unpaid_amount"])),
+          訂單款項: totalAmount,
+          已收金額: paidAmount,
+          剩餘尾款: unpaidAmount,
           UUID: pick(it, ["uuid", "order_uuid", "id", "order_id"]),
           電話: phone || ""
         };
