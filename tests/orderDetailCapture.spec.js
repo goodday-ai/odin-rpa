@@ -628,20 +628,38 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return String(row["訂單編號"] || "");
   }
 
-  function stableSig(row) {
-    const parts = [
-      row["入住日期"],
-      row["退房日期"],
-      row["姓名"],
-      row["房型"],
-      row["專案名稱"],
-      row["訂單款項"],
-      row["已收金額"],
-      row["剩餘尾款"],
-      row["電話"]
-    ];
-    return parts.map((x) => String(x || "")).join("|");
-  }
+// =======================================================
+// ✅ 訂單變動判斷（Snapshot Signature）
+// -------------------------------------------------------
+// 設計原則：
+// - 只依賴 calendar_list API 的資料
+// - 不依賴 detail API（電話 / 房型 / 專案名稱）
+// - 避免 detail cache 命中時導致 JSON 不更新
+//
+// 會影響 snapshot 的欄位：
+// - 入住日期
+// - 退房日期
+// - 訂單款項
+// - 已收金額
+// - 剩餘尾款
+//
+// 不納入判斷（來自 detail API）：
+// - 房型
+// - 專案名稱
+// - 電話
+// =======================================================
+
+function stableSig(row) {
+  const parts = [
+    row["入住日期"],
+    row["退房日期"],
+    row["訂單款項"],
+    row["已收金額"],
+    row["剩餘尾款"]
+  ];
+
+  return parts.map((x) => String(x || "")).join("|");
+}
 
   function readSnapshotSafe(p) {
     try {
