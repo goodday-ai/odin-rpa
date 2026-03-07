@@ -496,6 +496,23 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const hotelNameById = {};
   for (const h of hotels) hotelNameById[String(h.id)] = String(h.name || "");
 
+  // ✅ 參數診斷：輸出「設定要跑」與「實際可管理」的館別，方便排查新增館別卻沒產生 JSON
+  const discoveredHotelIdSet = new Set(hotels.map((h) => String(h.id)));
+  const missingFromPermission = hotelIds.filter((id) => !discoveredHotelIdSet.has(String(id)));
+  fs.writeFileSync(
+    `${outDir}/odin_hotels_plan.json`,
+    JSON.stringify(
+      {
+        configuredHotelIds: hotelIds,
+        discoveredHotelIds: hotels.map((h) => String(h.id)),
+        missingFromPermission
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
   if (listHotelsOnly) {
     console.log("✅ ODIN_LIST_HOTELS_ONLY=1, stop here.");
     return;
@@ -504,6 +521,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   if (!hotelIds.length) {
     console.log("❌ Missing ODIN_HOTEL_IDS or ODIN_HOTEL_ID. See out/odin_hotels_candidates.json");
     throw new Error("Missing ODIN_HOTEL_IDS (or ODIN_HOTEL_ID)");
+  }
+
+  if (missingFromPermission.length) {
+    console.log("❌ Configured ODIN_HOTEL_IDS not found in discovered hotels:", missingFromPermission.join(","));
+    console.log("ℹ️ See out/odin_hotels_plan.json and out/odin_hotels_candidates.json");
+    throw new Error(`Hotel permission mismatch. missing=${missingFromPermission.join(",")}`);
   }
 
   // -----------------------------
