@@ -236,10 +236,7 @@ jobs:
             console.error('🚨 GAS error detected in out json:', bad.slice(0, 20))
             process.exit(1)
           }
-
           console.log('✅ GAS error scan passed.')
-          NODE
-                    console.log('✅ GAS error scan passed.')
           NODE
 
       # ✅ 新增：把 Playwright 產生的 JSON 同步到 SSOT
