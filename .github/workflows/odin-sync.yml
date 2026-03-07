@@ -239,6 +239,25 @@ jobs:
 
           console.log('✅ GAS error scan passed.')
           NODE
+                    console.log('✅ GAS error scan passed.')
+          NODE
+
+      # ✅ 新增：把 Playwright 產生的 JSON 同步到 SSOT
+      - name: Sync JSON → SSOT data/odin/latest
+        run: |
+          echo "Sync JSON → SSOT data/odin/latest"
+
+          mkdir -p data/odin/latest
+
+          rsync -av \
+            --include="orders_sheet_ready_*.json" \
+            --include="orders_sheet_ready_changed_*.json" \
+            --exclude="*" \
+            out/ \
+            data/odin/latest/
+
+          echo "After sync:"
+          ls -al data/odin/latest || true
 
       # ✅ 穩定推送：使用 worktree 處理 odin-data（不在主工作目錄切分支，避免 checkout 覆寫變更）
       - name: Publish SSOT JSON to odin-data branch (safe via worktree)
