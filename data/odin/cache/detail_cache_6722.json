@@ -64,5 +64,11 @@
     "roomType": "default_room_config",
     "phone": "0928188730",
     "updatedAt": "2026-03-08"
+  },
+  "OBE47540672226030801": {
+    "projectName": "Trip",
+    "roomType": "default_room_config",
+    "phone": "0985431589",
+    "updatedAt": "2026-03-08"
   }
 }
