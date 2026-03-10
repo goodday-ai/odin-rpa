@@ -142,5 +142,11 @@
     "roomType": "包棟",
     "phone": "0918285009",
     "updatedAt": "2026-03-04"
+  },
+  "OBE51450572026031001": {
+    "projectName": "Booking 3F",
+    "roomType": "3F",
+    "phone": "(886)0973369988",
+    "updatedAt": "2026-03-10"
   }
 }
