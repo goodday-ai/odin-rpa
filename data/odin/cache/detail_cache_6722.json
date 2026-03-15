@@ -88,5 +88,11 @@
     "roomType": "default_room_config",
     "phone": "0983381719",
     "updatedAt": "2026-03-14"
+  },
+  "OBE53400672226031501": {
+    "projectName": "Booking",
+    "roomType": "預設房號0001",
+    "phone": "+622035640799",
+    "updatedAt": "2026-03-15"
   }
 }
