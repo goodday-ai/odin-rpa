@@ -40,5 +40,17 @@
     "roomType": "三房包棟",
     "phone": "0903550037",
     "updatedAt": "2026-03-15"
+  },
+  "OBE42770653726031507": {
+    "projectName": "包棟",
+    "roomType": "三房包棟",
+    "phone": "0923176571",
+    "updatedAt": "2026-03-16"
+  },
+  "OBE51430653726031508": {
+    "projectName": "官網限定優惠",
+    "roomType": "三房包棟",
+    "phone": "0930970807",
+    "updatedAt": "2026-03-16"
   }
 }
