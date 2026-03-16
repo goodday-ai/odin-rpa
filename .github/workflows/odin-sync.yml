@@ -167,6 +167,14 @@ jobs:
           ODIN_SHEET_WEBAPP_URL: ${{ secrets.ODIN_SHEET_WEBAPP_URL }}
           ODIN_SHEET_TOKEN: ${{ secrets.ODIN_SHEET_TOKEN }}
           ODIN_SPREADSHEET_ID: ${{ secrets.ODIN_SPREADSHEET_ID }}
+
+          # ✅ 可由 Secrets / Variables 覆寫 detail 行為
+          # - 若未設定，會回到程式內建預設值
+          ODIN_FETCH_DETAIL: ${{ secrets.ODIN_FETCH_DETAIL || vars.ODIN_FETCH_DETAIL }}
+          ODIN_DETAIL_FORCE_REFRESH: ${{ secrets.ODIN_DETAIL_FORCE_REFRESH || vars.ODIN_DETAIL_FORCE_REFRESH }}
+          ODIN_DETAIL_REFRESH_HOUR: ${{ secrets.ODIN_DETAIL_REFRESH_HOUR || vars.ODIN_DETAIL_REFRESH_HOUR }}
+          ODIN_DETAIL_THROTTLE_MS: ${{ secrets.ODIN_DETAIL_THROTTLE_MS || vars.ODIN_DETAIL_THROTTLE_MS }}
+          ODIN_DETAIL_REFRESH_THROTTLE_MS: ${{ secrets.ODIN_DETAIL_REFRESH_THROTTLE_MS || vars.ODIN_DETAIL_REFRESH_THROTTLE_MS }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
@@ -193,6 +201,11 @@ jobs:
           echo "ODIN_WRITE_SHEET=${ODIN_WRITE_SHEET:-unset}"
           echo "ODIN_CANCEL_SCAN=${ODIN_CANCEL_SCAN:-unset}"
           echo "ODIN_CANCEL_ORDER_STATUS=${ODIN_CANCEL_ORDER_STATUS:-unset}"
+          echo "ODIN_FETCH_DETAIL=${ODIN_FETCH_DETAIL:-unset}"
+          echo "ODIN_DETAIL_FORCE_REFRESH=${ODIN_DETAIL_FORCE_REFRESH:-unset}"
+          echo "ODIN_DETAIL_REFRESH_HOUR=${ODIN_DETAIL_REFRESH_HOUR:-unset}"
+          echo "ODIN_DETAIL_THROTTLE_MS=${ODIN_DETAIL_THROTTLE_MS:-unset}"
+          echo "ODIN_DETAIL_REFRESH_THROTTLE_MS=${ODIN_DETAIL_REFRESH_THROTTLE_MS:-unset}"
 
           npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
 
