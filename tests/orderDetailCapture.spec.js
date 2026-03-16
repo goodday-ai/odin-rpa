@@ -108,6 +108,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
 
+  // ✅ API 請求逾時（避免單一請求拖到整體測試逾時）
+  const apiTimeoutMsRaw = Number(process.env.ODIN_API_TIMEOUT_MS || "20000");
+  const apiTimeoutMs = Number.isFinite(apiTimeoutMsRaw) ? Math.max(3000, Math.min(120000, apiTimeoutMsRaw)) : 20000;
+  const cancelApiTimeoutMsRaw = Number(process.env.ODIN_CANCEL_API_TIMEOUT_MS || String(apiTimeoutMs));
+  const cancelApiTimeoutMs = Number.isFinite(cancelApiTimeoutMsRaw) ? Math.max(3000, Math.min(120000, cancelApiTimeoutMsRaw)) : apiTimeoutMs;
+
   // ✅ 是否要打 detail 補欄位（預設開）
   const fetchDetail = String(process.env.ODIN_FETCH_DETAIL || "1") === "1";
   const detailThrottleMsRaw = Number(process.env.ODIN_DETAIL_THROTTLE_MS || "0");
@@ -136,6 +142,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
   const detailForceRefreshEffective = detailForceRefresh || isScheduledDetailRefreshWindow;
 
+  // ✅ 每日 6 點（或 refreshHour）可切到「全量覆寫模式」：不做 changedOnly、不掃 cancel，直接全量覆寫 Sheet
+  const scheduledFullRewrite =
+    isScheduledDetailRefreshWindow &&
+    String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "1") === "1";
+  const changedOnlyEffective = scheduledFullRewrite ? false : changedOnly;
+  const cancelScanEffective = scheduledFullRewrite ? false : cancelScan;
+
   // ✅ 在 full refresh 時段提高 detail 節流（避免多館別打太快）
   // - 非 full refresh 時段沿用 ODIN_DETAIL_THROTTLE_MS
   const refreshThrottleMsRaw = Number(process.env.ODIN_DETAIL_REFRESH_THROTTLE_MS || "800");
@@ -143,6 +156,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const effectiveDetailThrottleMs = isScheduledDetailRefreshWindow
     ? Math.max(detailThrottleMs, refreshThrottleMs)
     : detailThrottleMs;
+  const detailConcurrency = clampInt(process.env.ODIN_DETAIL_CONCURRENCY || "6", 1, 20, 6);
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
@@ -301,17 +315,25 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| sort_by=",
     sortBy || "(empty)",
     "| cancelScan=",
-    cancelScan ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
+    cancelScanEffective ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
     "| taipeiHour=",
     nowTaipeiHour,
     "| detailRefreshHour=",
     refreshHour >= 0 ? refreshHour : "disabled",
     "| scheduledRefreshWindow=",
     isScheduledDetailRefreshWindow ? "YES" : "NO",
+    "| scheduledFullRewrite=",
+    scheduledFullRewrite ? "YES" : "NO",
     "| detailCache=",
     fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
     "| detailThrottleMs=",
-    effectiveDetailThrottleMs
+    effectiveDetailThrottleMs,
+    "| detailConcurrency=",
+    detailConcurrency,
+    "| apiTimeoutMs=",
+    apiTimeoutMs,
+    "| cancelApiTimeoutMs=",
+    cancelApiTimeoutMs
   );
 
   const loginUrl =
@@ -407,7 +429,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   async function fetchJsonSafe(url, headers) {
     try {
-      const r = await page.request.get(url, { headers });
+      const r = await page.request.get(url, { headers, timeout: apiTimeoutMs });
       const s = r.status();
       const j = await r.json().catch(() => ({}));
       return { ok: s === 200, httpStatus: s, json: j, url };
@@ -569,6 +591,24 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // -----------------------------
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function runWithConcurrency(items, limit, worker) {
+    const n = Array.isArray(items) ? items.length : 0;
+    if (!n) return;
+
+    let idx = 0;
+    const size = Math.max(1, Math.min(limit || 1, n));
+
+    const runners = Array.from({ length: size }, async () => {
+      while (idx < n) {
+        const current = idx;
+        idx++;
+        await worker(items[current], current);
+      }
+    });
+
+    await Promise.all(runners);
   }
 
   function pick(obj, keys) {
@@ -816,7 +856,7 @@ function stableSig(row) {
     while (pageNo <= totalPages) {
       const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
 
-      const listRes = await page.request.get(listUrl, { headers: baseHeaders });
+      const listRes = await page.request.get(listUrl, { headers: baseHeaders, timeout: apiTimeoutMs });
       const listStatus = listRes.status();
       const listJson = await listRes.json().catch(() => ({}));
 
@@ -840,6 +880,8 @@ function stableSig(row) {
       const listData = Array.isArray(listJson.data) ? listJson.data : [];
       console.log("✅ calendar_list:", hotelId, hotelName ? `(${hotelName})` : "", `page=${pageNo}/${totalPages}`, "items =", listData.length);
 
+      const pageOrders = [];
+
       for (const it of listData) {
         const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
         if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
@@ -852,65 +894,69 @@ function stableSig(row) {
           continue;
         }
 
-        // ✅ 先拿 list 內能拿到的值
-        let projectName = pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]);
-        let roomType = pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]);
-        let phone = normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]));
+        pageOrders.push({
+          it,
+          key: String(orderSerial),
+          projectName: pick(it, ["plan_name", "project_name", "rate_plan_name", "source", "order_category"]),
+          roomType: pick(it, ["room_names", "room_type_name", "roomTypeName", "room_type"]),
+          phone: normalizePhone(pick(it, ["phone", "mobile", "tel", "customer_phone"]))
+        });
+      }
 
-        // =======================================================
-        // ✅ detail 補齊：先查 cache，再決定是否要打 detail
-        // - 預設：只打「快取不存在」的新訂單
-        // - 若 ODIN_DETAIL_FORCE_REFRESH=1：無視快取，全部重打（一般不用）
-        // =======================================================
-        if (fetchDetail) {
-          const key = String(orderSerial);
+      if (fetchDetail && pageOrders.length) {
+        const detailTargets = [];
 
-          const cached = detailCacheMap && detailCacheMap[key] ? detailCacheMap[key] : null;
+        for (const order of pageOrders) {
+          const cached = detailCacheMap && detailCacheMap[order.key] ? detailCacheMap[order.key] : null;
           const cacheOk = cached && typeof cached === "object";
 
           if (cacheOk && !detailForceRefreshEffective) {
-            // ✅ 命中快取：不打 detail
             detailCacheHit.count++;
-
-            if (cached.projectName) projectName = String(cached.projectName);
-            if (cached.roomType) roomType = String(cached.roomType);
-            if (cached.phone) phone = normalizePhone(cached.phone);
-          } else {
-            // ✅ 未命中或強刷：打 detail
-            detailCacheMiss.count++;
-
-            if (effectiveDetailThrottleMs > 0) await sleep(effectiveDetailThrottleMs);
-
-            const detailRes = await fetchOrderDetail(hotelId, key, baseHeaders);
-            if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
-              const extractedProject = extractProjectNameFromDetail(detailRes.json);
-              const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
-              const extractedPhone = extractPhoneFromDetail(detailRes.json);
-
-              if (extractedProject) projectName = extractedProject;
-              if (extractedRoomType) roomType = extractedRoomType;
-              if (extractedPhone) phone = normalizePhone(extractedPhone);
-
-              detailCacheMap[key] = {
-                projectName: projectName || "",
-                roomType: roomType || "",
-                phone: phone || "",
-                updatedAt: taipeiTodayYMD()
-              };
-              detailCacheWrite.count++;
-            } else {
-              // 打不到也要落一筆，避免每次都狂打同一張單（但保留可覆寫）
-              detailCacheMap[key] = {
-                projectName: projectName || "",
-                roomType: roomType || "",
-                phone: phone || "",
-                updatedAt: taipeiTodayYMD(),
-                note: "detail_fetch_failed"
-              };
-              detailCacheWrite.count++;
-            }
+            if (cached.projectName) order.projectName = String(cached.projectName);
+            if (cached.roomType) order.roomType = String(cached.roomType);
+            if (cached.phone) order.phone = normalizePhone(cached.phone);
+            continue;
           }
+
+          detailCacheMiss.count++;
+          detailTargets.push(order);
         }
+
+        await runWithConcurrency(detailTargets, detailConcurrency, async (order) => {
+          if (effectiveDetailThrottleMs > 0) await sleep(effectiveDetailThrottleMs);
+
+          const detailRes = await fetchOrderDetail(hotelId, order.key, baseHeaders);
+          if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
+            const extractedProject = extractProjectNameFromDetail(detailRes.json);
+            const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
+            const extractedPhone = extractPhoneFromDetail(detailRes.json);
+
+            if (extractedProject) order.projectName = extractedProject;
+            if (extractedRoomType) order.roomType = extractedRoomType;
+            if (extractedPhone) order.phone = normalizePhone(extractedPhone);
+
+            detailCacheMap[order.key] = {
+              projectName: order.projectName || "",
+              roomType: order.roomType || "",
+              phone: order.phone || "",
+              updatedAt: taipeiTodayYMD()
+            };
+            detailCacheWrite.count++;
+          } else {
+            detailCacheMap[order.key] = {
+              projectName: order.projectName || "",
+              roomType: order.roomType || "",
+              phone: order.phone || "",
+              updatedAt: taipeiTodayYMD(),
+              note: "detail_fetch_failed"
+            };
+            detailCacheWrite.count++;
+          }
+        });
+      }
+
+      for (const order of pageOrders) {
+        const { it, key, projectName, roomType, phone } = order;
 
         const totalAmountRaw = pick(it, ["total", "total_amount", "amount", "price", "order_total", "order_amount"]);
         const paidAmountRaw = pick(it, ["paid", "paid_amount", "total_paid", "paid_total", "received_amount", "received"]);
@@ -936,7 +982,7 @@ function stableSig(row) {
 
         const row = {
           訂單日期: toSheetDate(pick(it, ["created_at", "createdAt", "order_created_at", "orderDate", "order_date"])),
-          訂單編號: String(orderSerial),
+          訂單編號: key,
           入住日期: toSheetDate(pick(it, ["sdate", "checkin_date", "checkinDate", "check_in"])),
           退房日期: toSheetDate(pick(it, ["edate", "checkout_date", "checkoutDate", "check_out"])),
           姓名: pick(it, ["fullname", "customer_name", "guest_name", "name", "lastname", "firstname"]),
@@ -959,7 +1005,7 @@ function stableSig(row) {
     // =======================================================
     // ✅ 第二輪（可選）：掃描取消單，只收集 cancelledOrderNos
     // =======================================================
-    if (cancelScan && cancelOrderStatusList.length) {
+    if (cancelScanEffective && cancelOrderStatusList.length) {
       for (const cancelStatus of cancelOrderStatusList) {
         let cp = 1;
         let ctp = 1;
@@ -967,7 +1013,15 @@ function stableSig(row) {
         while (cp <= ctp) {
           const cancelUrl = buildListUrl(hotelId, cp, rangeStr, cancelStatus);
 
-          const cancelRes = await page.request.get(cancelUrl, { headers: baseHeaders });
+          let cancelRes;
+          try {
+            cancelRes = await page.request.get(cancelUrl, { headers: baseHeaders, timeout: cancelApiTimeoutMs });
+          } catch (e) {
+            const errMsg = String(e && e.message ? e.message : e);
+            console.warn(`⚠️ cancel_scan request timeout: hotelId=${hotelId} status=${cancelStatus} page=${cp} err=${errMsg}`);
+            break;
+          }
+
           const cancelHttp = cancelRes.status();
           const cancelJson = await cancelRes.json().catch(() => ({}));
 
@@ -1016,11 +1070,11 @@ function stableSig(row) {
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
     console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
-    console.log("🧾 cancelScan:", cancelScan ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
+    console.log("🧾 cancelScan:", cancelScanEffective ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
 
     let rowsToSync = rows;
 
-    if (changedOnly) {
+    if (changedOnlyEffective) {
       const snapshotPath = snapshotPathFor(hotelId);
       const prev = readSnapshotSafe(snapshotPath);
       const next = {};
@@ -1056,13 +1110,14 @@ function stableSig(row) {
         columns,
         rows: rowsToSync,
         cancelledOrderNos: uniqueCancelled,
+        replaceAllRows: scheduledFullRewrite,
         rangeStr
       },
       hotelId,
       hotelName
     );
 
-    console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")");
+    console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", scheduledFullRewrite ? "FULL_REWRITE" : (changedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
 
     if (!rows.length) {
       console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
