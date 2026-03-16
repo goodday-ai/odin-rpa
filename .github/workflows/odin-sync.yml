@@ -29,6 +29,9 @@ jobs:
       ODIN_LANG: zh_tw
       ODIN_OUT_DIR: out
 
+      # ✅ GitHub Actions JS actions 先行切到 Node 24（因 Node 20 runtime deprecation）
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
       # ✅ 預設以 ODIN_YEAR 全年度模式抓取（可在手動觸發時覆寫）
       ODIN_YEAR: ""
       ODIN_DAYS: "120"
