@@ -53,6 +53,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return dtf.format(new Date()); // yyyy-mm-dd
   }
 
+  function taipeiNowHour() {
+    const dtf = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei",
+      hour: "2-digit",
+      hour12: false
+    });
+    const h = Number(dtf.format(new Date()));
+    return Number.isFinite(h) ? h : -1;
+  }
+
   function clampInt(n, min, max, fallback) {
     const x = Number(n);
     if (!Number.isFinite(x)) return fallback;
@@ -116,6 +126,23 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // ✅ Detail Cache：是否強制刷新（預設不刷新，只打新訂單）
   // - ODIN_DETAIL_FORCE_REFRESH=1：不管有沒有快取都重打（一般不用）
   const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
+
+  // ✅ 每日定時 full detail refresh（台北時區）
+  // - 預設 6 點；設空字串可停用
+  // - 命中該小時時，等效 ODIN_DETAIL_FORCE_REFRESH=1
+  const refreshHourRaw = String(process.env.ODIN_DETAIL_REFRESH_HOUR || "6").trim();
+  const refreshHour = refreshHourRaw === "" ? -1 : clampInt(refreshHourRaw, 0, 23, 6);
+  const nowTaipeiHour = taipeiNowHour();
+  const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
+  const detailForceRefreshEffective = detailForceRefresh || isScheduledDetailRefreshWindow;
+
+  // ✅ 在 full refresh 時段提高 detail 節流（避免多館別打太快）
+  // - 非 full refresh 時段沿用 ODIN_DETAIL_THROTTLE_MS
+  const refreshThrottleMsRaw = Number(process.env.ODIN_DETAIL_REFRESH_THROTTLE_MS || "800");
+  const refreshThrottleMs = Number.isFinite(refreshThrottleMsRaw) ? Math.max(0, Math.min(3000, refreshThrottleMsRaw)) : 800;
+  const effectiveDetailThrottleMs = isScheduledDetailRefreshWindow
+    ? Math.max(detailThrottleMs, refreshThrottleMs)
+    : detailThrottleMs;
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
@@ -275,8 +302,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     sortBy || "(empty)",
     "| cancelScan=",
     cancelScan ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
+    "| taipeiHour=",
+    nowTaipeiHour,
+    "| detailRefreshHour=",
+    refreshHour >= 0 ? refreshHour : "disabled",
+    "| scheduledRefreshWindow=",
+    isScheduledDetailRefreshWindow ? "YES" : "NO",
     "| detailCache=",
-    fetchDetail ? (detailForceRefresh ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF"
+    fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
+    "| detailThrottleMs=",
+    effectiveDetailThrottleMs
   );
 
   const loginUrl =
@@ -643,7 +678,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 // - 已收金額
 // - 剩餘尾款
 //
-// 不納入判斷（來自 detail API）：
+// 也納入判斷（含 detail 補齊欄位）：
 // - 房型
 // - 專案名稱
 // - 電話
@@ -655,7 +690,10 @@ function stableSig(row) {
     row["退房日期"],
     row["訂單款項"],
     row["已收金額"],
-    row["剩餘尾款"]
+    row["剩餘尾款"],
+    row["房型"],
+    row["專案名稱"],
+    row["電話"]
   ];
 
   return parts.map((x) => String(x || "")).join("|");
@@ -830,7 +868,7 @@ function stableSig(row) {
           const cached = detailCacheMap && detailCacheMap[key] ? detailCacheMap[key] : null;
           const cacheOk = cached && typeof cached === "object";
 
-          if (cacheOk && !detailForceRefresh) {
+          if (cacheOk && !detailForceRefreshEffective) {
             // ✅ 命中快取：不打 detail
             detailCacheHit.count++;
 
@@ -841,7 +879,7 @@ function stableSig(row) {
             // ✅ 未命中或強刷：打 detail
             detailCacheMiss.count++;
 
-            if (detailThrottleMs > 0) await sleep(detailThrottleMs);
+            if (effectiveDetailThrottleMs > 0) await sleep(effectiveDetailThrottleMs);
 
             const detailRes = await fetchOrderDetail(hotelId, key, baseHeaders);
             if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
