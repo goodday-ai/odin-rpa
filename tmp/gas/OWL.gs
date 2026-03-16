@@ -73,6 +73,7 @@ function _syncOne_(ss, item) {
   const columns = _normalizeColumns_(Array.isArray(item && item.columns) ? item.columns : []);
   const rows = Array.isArray(item && item.rows) ? item.rows : [];
   const cancelledOrderNos = Array.isArray(item && item.cancelledOrderNos) ? item.cancelledOrderNos : [];
+  const replaceAllRows = !!(item && item.replaceAllRows);
 
   if (!hotelId) return { ok: false, hotelId: hotelId, error: "Missing hotelId" };
   if (!columns.length) return { ok: false, hotelId: hotelId, error: "Missing columns" };
@@ -84,7 +85,7 @@ function _syncOne_(ss, item) {
   const yearSet = {};
   for (const y of Object.keys(groups)) yearSet[y] = true;
 
-  if (hasCancel) {
+  if (hasCancel || replaceAllRows) {
     const scanYears = _discoverPossibleYears_(ss, hotelName, hotelId);
     for (const y of scanYears) yearSet[y] = true;
   }
@@ -110,7 +111,10 @@ function _syncOne_(ss, item) {
 
     _ensureHeaderRow_(sh, columns);
 
-    const delInfo = hasCancel ? _deleteCancelled_(sh, columns, cancelledOrderNos) : { ok: true, deleted: 0, cancelIncoming: 0 };
+    const clearInfo = replaceAllRows ? _clearDataRows_(sh) : { ok: true, cleared: 0 };
+    const delInfo = replaceAllRows
+      ? { ok: true, deleted: 0, cancelIncoming: hasCancel ? cancelledOrderNos.length : 0, skipped: true, reason: "replace_all" }
+      : (hasCancel ? _deleteCancelled_(sh, columns, cancelledOrderNos) : { ok: true, deleted: 0, cancelIncoming: 0 });
     const wrote = _upsertRows_(sh, columns, groups[year]);
     const sortInfo = _sortSheet_(sh, columns);
     const updatedAt = _setUpdatedTimestamp_(sh);
@@ -118,6 +122,7 @@ function _syncOne_(ss, item) {
     summary.wrote.push({
       year: year,
       sheetName: sheetName,
+      cleared: clearInfo && clearInfo.ok ? clearInfo.cleared : 0,
       deleted: delInfo && delInfo.ok ? delInfo.deleted : 0,
       cancelIncoming: delInfo && delInfo.ok ? delInfo.cancelIncoming : 0,
       deleteError: delInfo && delInfo.ok ? "" : (delInfo && delInfo.error ? delInfo.error : ""),
@@ -131,6 +136,20 @@ function _syncOne_(ss, item) {
   }
 
   return summary;
+}
+
+function _clearDataRows_(sh) {
+  try {
+    const dataStartRow = 2;
+    const lastRow = sh.getLastRow();
+    if (lastRow < dataStartRow) return { ok: true, cleared: 0 };
+
+    const count = lastRow - dataStartRow + 1;
+    sh.deleteRows(dataStartRow, count);
+    return { ok: true, cleared: count };
+  } catch (err) {
+    return { ok: false, cleared: 0, error: String(err && err.message ? err.message : err) };
+  }
 }
 
 function _normalizeColumns_(columns) {
