@@ -114,7 +114,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const detailThrottleMs = Number.isFinite(detailThrottleMsRaw) ? Math.max(0, Math.min(3000, detailThrottleMsRaw)) : 0;
 
   // ✅ 策略一（寫入 Sheet）：GAS Web App
-  const writeSheet = String(process.env.ODIN_WRITE_SHEET || "0") === "1";
+  const writeSheet = String(process.env.ODIN_WRITE_SHEET || "1") === "1";
 
   // ✅ 第二輪：取消單掃描（只收 cancelledOrderNos）
   const cancelScan = String(process.env.ODIN_CANCEL_SCAN || "0") === "1";
