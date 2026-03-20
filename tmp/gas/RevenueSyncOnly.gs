@@ -269,12 +269,16 @@ function syncRoomToRevenueOnly() {
     }
 
     // ✅ 來源端訂單集合（用於清除）
-    const roomOrderIds = new Set(roomData.map(r => r[REV_SYNC_CONFIG.ROOM_COLS.ORDER_ID - 1]).filter(Boolean));
+    const roomOrderIds = new Set(
+      roomData
+        .map(r => String(r[REV_SYNC_CONFIG.ROOM_COLS.ORDER_ID - 1] || "").trim())
+        .filter(Boolean)
+    );
 
     // ✅ 新增 / 更新
     for (let i = 0; i < roomData.length; i++) {
       const src = roomData[i];
-      const orderId = src[REV_SYNC_CONFIG.ROOM_COLS.ORDER_ID - 1];
+      const orderId = String(src[REV_SYNC_CONFIG.ROOM_COLS.ORDER_ID - 1] || "").trim();
       if (!orderId) continue;
 
       // ✅ SOURCE 的 L 欄電話（第12欄）
