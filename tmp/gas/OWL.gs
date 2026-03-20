@@ -413,6 +413,8 @@ function _sortSheet_(sh, columns) {
     const height = lastRow - dataStartRow + 1;
     if (height <= 1) return { ok: true, skipped: true, reason: "not enough rows" };
 
+    _normalizeDateCellsInSheet_(sh, columns, dataStartRow, height);
+
     sh.getRange(dataStartRow, 1, height, columns.length).sort([
       { column: checkinCol, ascending: true },
       { column: orderNoCol, ascending: true }
@@ -421,6 +423,31 @@ function _sortSheet_(sh, columns) {
     return { ok: true, sorted: true, by: ["入住日期", "訂單編號"] };
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+}
+
+function _normalizeDateCellsInSheet_(sh, columns, dataStartRow, height) {
+  const dateCols = ["訂單日期", "入住日期", "退房日期"];
+
+  for (const n of dateCols) {
+    const col = columns.indexOf(n) + 1;
+    if (col <= 0) continue;
+
+    const rg = sh.getRange(dataStartRow, col, height, 1);
+    const vals = rg.getValues();
+
+    let changed = false;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i][0];
+      const parsed = _parseDateLike_(v);
+      if (parsed && !(v instanceof Date && !isNaN(v))) {
+        vals[i][0] = parsed;
+        changed = true;
+      }
+    }
+
+    if (changed) rg.setValues(vals);
+    rg.setNumberFormat("yyyy/MM/dd");
   }
 }
 
@@ -439,24 +466,28 @@ function _cell_(v, colName) {
 
   // ✅ 日期欄：統一轉 Date 物件，讓型別一致
   if (name === "訂單日期" || name === "入住日期" || name === "退房日期") {
-    if (v instanceof Date && !isNaN(v)) return v;
-
-    const s = String(v).trim();
-    if (!s) return "";
-
-    // 支援 yyyy/MM/dd、yyyy-MM-dd、以及後面帶時間字串
-    const m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\D.*)?$/);
-    if (!m) return s;
-
-    const y = Number(m[1]);
-    const mm = Number(m[2]);
-    const dd = Number(m[3]);
-    if (!y || !mm || !dd) return s;
-
-    return new Date(y, mm - 1, dd);
+    const d = _parseDateLike_(v);
+    return d || String(v).trim();
   }
 
-  return v;
+    return v;
+}
+
+function _parseDateLike_(v) {
+  if (v instanceof Date && !isNaN(v)) return v;
+
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return null;
+
+  const m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\D.*)?$/);
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  if (!y || !mm || !dd) return null;
+
+  return new Date(y, mm - 1, dd);
 }
 
 function _discoverPossibleYears_(ss, hotelName, hotelId) {
