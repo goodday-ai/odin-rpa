@@ -439,10 +439,13 @@ function _cell_(v, colName) {
 
   // ✅ 日期欄：統一轉 Date 物件，讓型別一致
   if (name === "訂單日期" || name === "入住日期" || name === "退房日期") {
+    if (v instanceof Date && !isNaN(v)) return v;
+
     const s = String(v).trim();
     if (!s) return "";
 
-    const m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    // 支援 yyyy/MM/dd、yyyy-MM-dd、以及後面帶時間字串
+    const m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\D.*)?$/);
     if (!m) return s;
 
     const y = Number(m[1]);
