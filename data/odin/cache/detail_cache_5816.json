@@ -1168,5 +1168,17 @@
     "roomType": "M2｜Z2｜M5｜Z5",
     "phone": "0963415664",
     "updatedAt": "2026-03-20"
+  },
+  "OBE67620581626032101": {
+    "projectName": "OTA串接專案",
+    "roomType": "M2",
+    "phone": "0933473339",
+    "updatedAt": "2026-03-21"
+  },
+  "OBE14990581626032102": {
+    "projectName": "官網訂房專案",
+    "roomType": "M3",
+    "phone": "0955991620",
+    "updatedAt": "2026-03-21"
   }
 }
