@@ -442,5 +442,11 @@
     "roomType": "2F",
     "phone": "0968141703",
     "updatedAt": "2026-03-25"
+  },
+  "OBE95230672326032501": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "4F",
+    "phone": "0900000000",
+    "updatedAt": "2026-03-25"
   }
 }
