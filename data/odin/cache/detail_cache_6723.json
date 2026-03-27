@@ -466,5 +466,17 @@
     "roomType": "2F",
     "phone": "0910181739",
     "updatedAt": "2026-03-27"
+  },
+  "OBE08020672326032703": {
+    "projectName": "二臥室套房",
+    "roomType": "2F",
+    "phone": "0985020739",
+    "updatedAt": "2026-03-27"
+  },
+  "OBE61060672326032704": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "2F",
+    "phone": "0988864961",
+    "updatedAt": "2026-03-27"
   }
 }
