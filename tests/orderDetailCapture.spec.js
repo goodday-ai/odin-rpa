@@ -885,10 +885,16 @@ function stableSig(row) {
       for (const it of listData) {
         const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
         if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
-
+        
         const cancelled = isCancelledOrder(it);
-        if (cancelled) cancelledOrderNos.push(String(orderSerial));
-
+        
+        // ✅ 第一輪只做診斷與過濾，不直接加入 cancelledOrderNos
+        if (cancelled) {
+          console.log("⚠️ primary_list cancelled-like row:", hotelId, String(orderSerial), {
+            status: pick(it, ["status", "order_status", "booking_status", "state", "status_text", "order_status_text"])
+          });
+        }
+        
         if (excludeCancelled && cancelled) {
           cancelledSkipped.count++;
           continue;
