@@ -109,14 +109,15 @@ function _syncOne_(ss, item) {
     const sheetName = _buildSheetName_(year, hotelName, hotelId);
     const sh = _getOrCreateSheet_(ss, sheetName);
 
-    _ensureHeaderRow_(sh, columns);
+    const layout = _ensureHeaderRow_(sh, columns);
+    const dataStartRow = layout && layout.dataStartRow ? layout.dataStartRow : 2;
 
-    const clearInfo = replaceAllRows ? _clearDataRows_(sh) : { ok: true, cleared: 0 };
+    const clearInfo = replaceAllRows ? _clearDataRows_(sh, dataStartRow) : { ok: true, cleared: 0 };
     const delInfo = replaceAllRows
       ? { ok: true, deleted: 0, cancelIncoming: hasCancel ? cancelledOrderNos.length : 0, skipped: true, reason: "replace_all" }
-      : (hasCancel ? _deleteCancelled_(sh, columns, cancelledOrderNos) : { ok: true, deleted: 0, cancelIncoming: 0 });
-    const wrote = _upsertRows_(sh, columns, groups[year]);
-    const sortInfo = _sortSheet_(sh, columns);
+     : (hasCancel ? _deleteCancelled_(sh, columns, cancelledOrderNos, dataStartRow) : { ok: true, deleted: 0, cancelIncoming: 0 });
+    const wrote = _upsertRows_(sh, columns, groups[year], dataStartRow);
+    const sortInfo = _sortSheet_(sh, columns, dataStartRow);
     const updatedAt = _setUpdatedTimestamp_(sh);
 
     summary.wrote.push({
@@ -138,14 +139,14 @@ function _syncOne_(ss, item) {
   return summary;
 }
 
-function _clearDataRows_(sh) {
+function _clearDataRows_(sh, dataStartRow) {
   try {
-    const dataStartRow = 2;
+    const startRow = Number(dataStartRow || 2);
     const lastRow = sh.getLastRow();
-    if (lastRow < dataStartRow) return { ok: true, cleared: 0 };
+    if (lastRow < startRow) return { ok: true, cleared: 0 };
 
-    const count = lastRow - dataStartRow + 1;
-    sh.deleteRows(dataStartRow, count);
+    const count = lastRow - startRow + 1;
+    sh.deleteRows(startRow, count);
     return { ok: true, cleared: count };
   } catch (err) {
     return { ok: false, cleared: 0, error: String(err && err.message ? err.message : err) };
@@ -198,11 +199,20 @@ function _ensureHeaderRow_(sh, columns) {
   const range = sh.getRange(headerRow, 1, 1, columns.length);
   const current = range.getValues()[0] || [];
 
+  const empty =
+    current.length === columns.length &&
+    current.every(function(v) { return String(v == null ? "" : v).trim() === ""; });
   const same =
     current.length === columns.length &&
     current.every(function(v, i) { return String(v || "") === String(columns[i] || ""); });
 
-  if (!same) range.setValues([columns]);
+  let hasHeader = false;
+  if (same) {
+    hasHeader = true;
+  } else if (empty) {
+    range.setValues([columns]);
+    hasHeader = true;
+  }
 
   try { sh.setFrozenRows(2); } catch (_) {}
 
@@ -211,6 +221,8 @@ function _ensureHeaderRow_(sh, columns) {
 
   // ✅ 日期欄：顯示格式統一 yyyy/MM/dd（避免同欄混用 - 與 /）
   _ensureDateFormatColumns_(sh, columns, ["訂單日期", "入住日期", "退房日期"]);
+
+  return { hasHeader: hasHeader, dataStartRow: hasHeader ? 3 : 2 };
 }
 
 function _ensurePlainTextColumns_(sh, columns, colNames) {
@@ -257,21 +269,21 @@ function _setUpdatedTimestamp_(sh) {
   }
 }
 
-function _deleteCancelled_(sh, columns, cancelledOrderNos) {
+function _deleteCancelled_(sh, columns, cancelledOrderNos, dataStartRow) {
   try {
-    const dataStartRow = 3;
+    const startRow = Number(dataStartRow || 2);
     const keyName = "訂單編號";
     const keyColIndex = columns.indexOf(keyName);
     if (keyColIndex === -1) return { ok: false, error: "columns missing 訂單編號" };
 
     const lastRow = sh.getLastRow();
-    const existingRowCount = Math.max(0, lastRow - dataStartRow + 1);
+    const existingRowCount = Math.max(0, lastRow - startRow + 1);
     if (existingRowCount <= 0) {
       const cancelSetEmpty = _buildCancelSet_(cancelledOrderNos);
       return { ok: true, deleted: 0, cancelIncoming: Object.keys(cancelSetEmpty).length };
     }
 
-    const range = sh.getRange(dataStartRow, 1, existingRowCount, columns.length);
+    const range = sh.getRange(startRow, 1, existingRowCount, columns.length);
     const values = range.getValues();
 
     const cancelSet = _buildCancelSet_(cancelledOrderNos);
@@ -280,7 +292,7 @@ function _deleteCancelled_(sh, columns, cancelledOrderNos) {
     for (let i = 0; i < values.length; i++) {
       const rowVals = values[i];
       const key = String(rowVals[keyColIndex] || "").trim();
-      if (key && cancelSet[key]) rowsToDelete.push(dataStartRow + i);
+      if (key && cancelSet[key]) rowsToDelete.push(startRow + i);
     }
 
     if (!rowsToDelete.length) return { ok: true, deleted: 0, cancelIncoming: Object.keys(cancelSet).length };
@@ -303,25 +315,25 @@ function _buildCancelSet_(cancelledOrderNos) {
   return cancelSet;
 }
 
-function _upsertRows_(sh, columns, rows) {
-  const dataStartRow = 3;
+function _upsertRows_(sh, columns, rows, dataStartRow) {
+  const startRow = Number(dataStartRow || 2);
 
   const keyName = "訂單編號";
   const keyColIndex = columns.indexOf(keyName);
   if (keyColIndex === -1) return { ok: false, updated: 0, appended: 0, skippedSame: 0, totalIncoming: rows.length };
 
   const lastRow = sh.getLastRow();
-  const existingRowCount = Math.max(0, lastRow - dataStartRow + 1);
+  const existingRowCount = Math.max(0, lastRow - startRow + 1);
 
   const existingMap = {};
   if (existingRowCount > 0) {
-    const range = sh.getRange(dataStartRow, 1, existingRowCount, columns.length);
+    const range = sh.getRange(startRow, 1, existingRowCount, columns.length);
     const values = range.getValues();
 
     for (let i = 0; i < values.length; i++) {
       const rowVals = values[i];
       const key = String(rowVals[keyColIndex] || "").trim();
-      if (key) existingMap[key] = { row: dataStartRow + i, values: rowVals };
+      if (key) existingMap[key] = { row: startRow + i, values: rowVals };
     }
   }
 
@@ -398,11 +410,11 @@ function _rowEquals_(a, b) {
   return true;
 }
 
-function _sortSheet_(sh, columns) {
+function _sortSheet_(sh, columns, dataStartRow) {
   try {
-    const dataStartRow = 3;
+    const startRow = Number(dataStartRow || 2);
     const lastRow = sh.getLastRow();
-    if (lastRow < dataStartRow) return { ok: true, skipped: true, reason: "no data rows" };
+    if (lastRow < startRow) return { ok: true, skipped: true, reason: "no data rows" };
 
     const checkinCol = columns.indexOf("入住日期") + 1;
     const orderNoCol = columns.indexOf("訂單編號") + 1;
@@ -410,12 +422,12 @@ function _sortSheet_(sh, columns) {
     if (checkinCol <= 0) return { ok: true, skipped: true, reason: "missing 入住日期 column" };
     if (orderNoCol <= 0) return { ok: true, skipped: true, reason: "missing 訂單編號 column" };
 
-    const height = lastRow - dataStartRow + 1;
+    const height = lastRow - startRow + 1;
     if (height <= 1) return { ok: true, skipped: true, reason: "not enough rows" };
 
-    _normalizeDateCellsInSheet_(sh, columns, dataStartRow, height);
+    _normalizeDateCellsInSheet_(sh, columns, startRow, height);
 
-    sh.getRange(dataStartRow, 1, height, columns.length).sort([
+    sh.getRange(startRow, 1, height, columns.length).sort([
       { column: checkinCol, ascending: true },
       { column: orderNoCol, ascending: true }
     ]);
