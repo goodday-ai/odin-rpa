@@ -1006,6 +1006,7 @@ function stableSig(row) {
     // ✅ 第二輪（可選）：掃描取消單，只收集 cancelledOrderNos
     // =======================================================
     if (cancelScanEffective && cancelOrderStatusList.length) {
+      let cancelScanNonCancelledSkipped = 0;
       for (const cancelStatus of cancelOrderStatusList) {
         let cp = 1;
         let ctp = 1;
@@ -1042,11 +1043,20 @@ function stableSig(row) {
           for (const it of cancelData) {
             const orderSerial = pick(it, ["order_serial", "serial", "orderNo", "order_no", "order_number", "orderNumber"]);
             if (!orderSerial || !String(orderSerial).startsWith("OBE")) continue;
+            // ✅ 保險：即使第二輪用 cancel status 查詢，仍再次驗證該筆真的為取消單
+            // 避免 API 在某些狀況回混合狀態，導致正常單被誤送到 cancelledOrderNos。
+            if (!isCancelledOrder(it)) {
+              cancelScanNonCancelledSkipped++;
+              continue;
+            }
             cancelledOrderNos.push(String(orderSerial));
           }
 
           cp++;
         }
+      }
+      if (cancelScanNonCancelledSkipped > 0) {
+        console.log("⚠️ cancel_scan skipped non-cancelled rows:", hotelId, "count =", cancelScanNonCancelledSkipped);
       }
     }
 
