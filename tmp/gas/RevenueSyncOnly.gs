@@ -138,6 +138,27 @@ function _ensureRevenueStartRowPadding_(sheet) {
   }
 }
 
+function _sortRevenueRows_(sheet, startRow) {
+  try {
+    const sr = Number(startRow || 1);
+    const lastDataRow = _getLastDataRowByOrderId_(sheet, sr);
+    if (lastDataRow < sr) return { ok: true, skipped: true, reason: "no_data" };
+
+    const height = lastDataRow - sr + 1;
+    if (height <= 1) return { ok: true, skipped: true, reason: "not_enough_rows" };
+
+    // A~K 內排序即可（C:入住日期、B:訂單編號）
+    sheet.getRange(sr, 1, height, 11).sort([
+      { column: 3, ascending: true },
+      { column: 2, ascending: true }
+    ]);
+
+    return { ok: true, sorted: true, by: ["入住日期", "訂單編號"] };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+}
+
 /**
  * ✅ 以「訂單編號欄(B)」判定最後一筆有效資料列（避免被公式長尾撐大）
  */
@@ -380,6 +401,11 @@ function syncRoomToRevenueOnly() {
         cleared++;
         clearedIds.push(year + ":" + oid);
       }
+    }
+
+    const sortInfo = _sortRevenueRows_(revSheet, startRowRev);
+    if (!sortInfo.ok) {
+      Logger.log("⚠️ 排序失敗：" + revenueSheetName + " | " + sortInfo.error);
     }
   }
 
