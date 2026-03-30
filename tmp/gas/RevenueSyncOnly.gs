@@ -147,13 +147,13 @@ function _sortRevenueRows_(sheet, startRow) {
     const height = lastDataRow - sr + 1;
     if (height <= 1) return { ok: true, skipped: true, reason: "not_enough_rows" };
 
-    // A~K 內排序即可（C:入住日期、B:訂單編號）
-    sheet.getRange(sr, 1, height, 11).sort([
+    // A~N 內排序（C:入住日期、B:訂單編號）
+    sheet.getRange(sr, 1, height, 14).sort([
       { column: 3, ascending: true },
       { column: 2, ascending: true }
     ]);
 
-    return { ok: true, sorted: true, by: ["入住日期", "訂單編號"] };
+    return { ok: true, sorted: true, by: ["入住日期", "訂單編號"], range: "A:N" };
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) };
   }
@@ -297,6 +297,7 @@ function syncRoomToRevenueOnly() {
     );
 
     // ✅ 新增 / 更新
+    let changedByAddOrDelete = false;
     for (let i = 0; i < roomData.length; i++) {
       const src = roomData[i];
       const orderId = String(src[REV_SYNC_CONFIG.ROOM_COLS.ORDER_ID - 1] || "").trim();
@@ -344,6 +345,7 @@ function syncRoomToRevenueOnly() {
         revIndexMap.set(orderId, insertRow);
 
         added++;
+        changedByAddOrDelete = true;
         addedIds.push(year + ":" + orderId);
         continue;
       }
@@ -399,13 +401,16 @@ function syncRoomToRevenueOnly() {
       if (!roomOrderIds.has(oid)) {
         revSheet.getRange(idx, 1, 1, clearWidth).clearContent(); // A~N
         cleared++;
+        changedByAddOrDelete = true;
         clearedIds.push(year + ":" + oid);
       }
     }
 
-    const sortInfo = _sortRevenueRows_(revSheet, startRowRev);
-    if (!sortInfo.ok) {
-      Logger.log("⚠️ 排序失敗：" + revenueSheetName + " | " + sortInfo.error);
+    if (changedByAddOrDelete) {
+      const sortInfo = _sortRevenueRows_(revSheet, startRowRev);
+      if (!sortInfo.ok) {
+        Logger.log("⚠️ 排序失敗：" + revenueSheetName + " | " + sortInfo.error);
+      }
     }
   }
 
