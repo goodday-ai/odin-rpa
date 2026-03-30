@@ -29,6 +29,11 @@ jobs:
       ODIN_LANG: zh_tw
       ODIN_OUT_DIR: out
 
+      # ✅ 手動偵錯開關：
+      # - 預設 0：只有台北 06 點那輪會上傳 raw artifact
+      # - 設為 1：可手動 workflow_dispatch / repo variables 強制上傳
+      UPLOAD_ODIN_RAW_ARTIFACT: "0"
+
       # ✅ GitHub Actions JS actions 先行切到 Node 24（因 Node 20 runtime deprecation）
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -341,6 +346,44 @@ jobs:
           git push -u origin HEAD:"${ODIN_DATA_BRANCH}"
 
           cd -
+
+      - name: Decide whether to upload raw artifact
+        if: success()
+        id: odin_artifact_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOW_HOUR="$(TZ=Asia/Taipei date +%H)"
+          FORCE_UPLOAD="${UPLOAD_ODIN_RAW_ARTIFACT:-0}"
+
+          echo "NOW_HOUR=${NOW_HOUR}"
+          echo "FORCE_UPLOAD=${FORCE_UPLOAD}"
+
+          if [ "${NOW_HOUR}" = "06" ] || [ "${FORCE_UPLOAD}" = "1" ]; then
+            echo "upload=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=hour_${NOW_HOUR}_or_forced_${FORCE_UPLOAD}" >> "${GITHUB_OUTPUT}"
+            echo "✅ raw artifact upload enabled"
+          else
+            echo "upload=false" >> "${GITHUB_OUTPUT}"
+            echo "reason=skip_hour_${NOW_HOUR}" >> "${GITHUB_OUTPUT}"
+            echo "⏭️ raw artifact upload skipped"
+          fi
+
+      - name: Upload raw debug artifact (06:00 or forced)
+        if: success() && steps.odin_artifact_gate.outputs.upload == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: odin-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/orders_calendar_list_raw_*.json
+            out/orders_calendar_list_cancel_*.json
+            out/odin_me_raw.json
+            out/odin_hotels_list_raw.json
+            out/odin_hotels_candidates.json
+            out/odin_hotels_plan.json
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Prune out (success only, keep key files)
         if: success()
