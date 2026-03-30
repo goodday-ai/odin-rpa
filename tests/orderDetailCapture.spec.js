@@ -143,9 +143,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const detailForceRefreshEffective = detailForceRefresh || isScheduledDetailRefreshWindow;
 
   // ✅ 每日 6 點（或 refreshHour）可切到「全量覆寫模式」：不做 changedOnly、不掃 cancel，直接全量覆寫 Sheet
+  // ⚠️ 安全閥：若不是 ODIN_YEAR 年度模式，預設不允許全量覆寫，避免只抓到「區間資料」卻把整年歷史刪掉。
+  const fullRewriteEnabled = String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "1") === "1";
+  const allowPartialRangeFullRewrite = String(process.env.ODIN_ALLOW_PARTIAL_FULL_REWRITE || "0") === "1";
   const scheduledFullRewrite =
     isScheduledDetailRefreshWindow &&
-    String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "1") === "1";
+    fullRewriteEnabled &&
+    (useYearMode || allowPartialRangeFullRewrite);
   const changedOnlyEffective = scheduledFullRewrite ? false : changedOnly;
   const cancelScanEffective = scheduledFullRewrite ? false : cancelScan;
 
@@ -324,6 +328,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     isScheduledDetailRefreshWindow ? "YES" : "NO",
     "| scheduledFullRewrite=",
     scheduledFullRewrite ? "YES" : "NO",
+    "| allowPartialFullRewrite=",
+    allowPartialRangeFullRewrite ? "YES" : "NO",
     "| detailCache=",
     fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
     "| detailThrottleMs=",
@@ -335,6 +341,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| cancelApiTimeoutMs=",
     cancelApiTimeoutMs
   );
+
+  if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewrite) {
+    console.log(
+      "⚠️ full rewrite skipped: current run is not ODIN_YEAR mode. " +
+      "Set ODIN_ALLOW_PARTIAL_FULL_REWRITE=1 if you really want range-based full rewrite."
+    );
+  }
 
   const loginUrl =
     "https://auth.owlting.com/project/d0b8b1335b7beb195f5f9b7626e83341/login?redirect=https://api.owlting.com/booking/v2/admin/sso";
