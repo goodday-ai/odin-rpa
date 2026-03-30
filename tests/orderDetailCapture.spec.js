@@ -1129,13 +1129,16 @@ function stableSig(row) {
       } else if (prevSnapshotCount > 0) {
         const minByRatio = Math.ceil(prevSnapshotCount * fullRewriteMinRatio);
         const minByDrop = Math.max(0, prevSnapshotCount - fullRewriteMaxDrop);
-        const passByRatio = rows.length >= minByRatio;
-        const passByDrop = rows.length >= minByDrop;
 
-        if (!passByRatio && !passByDrop) {
+        // ✅ 採用更嚴格門檻：
+        // 必須同時滿足比例與最大掉筆數，才允許 full rewrite
+        // 換句話說，取兩者較嚴格的那個門檻
+        const minRequired = Math.max(minByRatio, minByDrop);
+
+        if (rows.length < minRequired) {
           blockedReason =
-            `rows=${rows.length} < minByRatio=${minByRatio} and < minByDrop=${minByDrop} ` +
-            `(prev=${prevSnapshotCount})`;
+            `rows=${rows.length} < minRequired=${minRequired} ` +
+            `(minByRatio=${minByRatio}, minByDrop=${minByDrop}, prev=${prevSnapshotCount})`;
         }
       }
 
