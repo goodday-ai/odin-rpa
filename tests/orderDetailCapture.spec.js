@@ -146,12 +146,24 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // ⚠️ 安全閥：若不是 ODIN_YEAR 年度模式，預設不允許全量覆寫，避免只抓到「區間資料」卻把整年歷史刪掉。
   const fullRewriteEnabled = String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "1") === "1";
   const allowPartialRangeFullRewrite = String(process.env.ODIN_ALLOW_PARTIAL_FULL_REWRITE || "0") === "1";
-  const scheduledFullRewrite =
+  const scheduledFullRewriteByClock =
     isScheduledDetailRefreshWindow &&
     fullRewriteEnabled &&
     (useYearMode || allowPartialRangeFullRewrite);
-  const changedOnlyEffective = scheduledFullRewrite ? false : changedOnly;
-  const cancelScanEffective = scheduledFullRewrite ? false : cancelScan;
+  const changedOnlyBase = scheduledFullRewriteByClock ? false : changedOnly;
+  const cancelScanBase = scheduledFullRewriteByClock ? false : cancelScan;
+
+  // ✅ 安全全量覆寫（Safe Full Rewrite）門檻：
+  // - 只有在定時 full rewrite 視窗內才會啟用
+  // - 若本輪 rows 明顯少於前次 snapshot，則自動降級成「全量 upsert（不清表）」
+  const fullRewriteMinRatioRaw = Number(process.env.ODIN_FULL_REWRITE_MIN_RATIO || "0.98");
+  const fullRewriteMinRatio = Number.isFinite(fullRewriteMinRatioRaw)
+    ? Math.max(0.5, Math.min(1, fullRewriteMinRatioRaw))
+    : 0.98;
+  const fullRewriteMaxDropRaw = Number(process.env.ODIN_FULL_REWRITE_MAX_DROP || "1");
+  const fullRewriteMaxDrop = Number.isFinite(fullRewriteMaxDropRaw)
+    ? Math.max(0, Math.min(1000, Math.trunc(fullRewriteMaxDropRaw)))
+    : 1;
 
   // ✅ 在 full refresh 時段提高 detail 節流（避免多館別打太快）
   // - 非 full refresh 時段沿用 ODIN_DETAIL_THROTTLE_MS
@@ -319,7 +331,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| sort_by=",
     sortBy || "(empty)",
     "| cancelScan=",
-    cancelScanEffective ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
+    cancelScanBase ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
     "| taipeiHour=",
     nowTaipeiHour,
     "| detailRefreshHour=",
@@ -327,9 +339,13 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| scheduledRefreshWindow=",
     isScheduledDetailRefreshWindow ? "YES" : "NO",
     "| scheduledFullRewrite=",
-    scheduledFullRewrite ? "YES" : "NO",
+    scheduledFullRewriteByClock ? "YES" : "NO",
     "| allowPartialFullRewrite=",
     allowPartialRangeFullRewrite ? "YES" : "NO",
+    "| fullRewriteMinRatio=",
+    fullRewriteMinRatio,
+    "| fullRewriteMaxDrop=",
+    fullRewriteMaxDrop,
     "| detailCache=",
     fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
     "| detailThrottleMs=",
@@ -342,7 +358,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     cancelApiTimeoutMs
   );
 
-  if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewrite) {
+  if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewriteByClock) {
     console.log(
       "⚠️ full rewrite skipped: current run is not ODIN_YEAR mode. " +
       "Set ODIN_ALLOW_PARTIAL_FULL_REWRITE=1 if you really want range-based full rewrite."
@@ -854,6 +870,9 @@ function stableSig(row) {
     let totalPages = 1;
 
     const cancelledSkipped = { count: 0 };
+    let hotelScheduledFullRewrite = scheduledFullRewriteByClock;
+    let hotelChangedOnlyEffective = changedOnlyBase;
+    let hotelCancelScanEffective = cancelScanBase;
 
     // ✅ 讀入「每館別」detail 快取（repo SSOT）
     ensureDirSafe(ssotCacheDir);
@@ -1024,7 +1043,7 @@ function stableSig(row) {
     // =======================================================
     // ✅ 第二輪（可選）：掃描取消單，只收集 cancelledOrderNos
     // =======================================================
-    if (cancelScanEffective && cancelOrderStatusList.length) {
+    if (hotelCancelScanEffective && cancelOrderStatusList.length) {
       let cancelScanNonCancelledSkipped = 0;
       for (const cancelStatus of cancelOrderStatusList) {
         let cp = 1;
@@ -1099,13 +1118,43 @@ function stableSig(row) {
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
     console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
-    console.log("🧾 cancelScan:", cancelScanEffective ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
+    const snapshotPath = snapshotPathFor(hotelId);
+    const prevSnapshot = readSnapshotSafe(snapshotPath);
+    const prevSnapshotCount = Object.keys(prevSnapshot).length;
+
+    if (hotelScheduledFullRewrite) {
+      let blockedReason = "";
+      if (rows.length === 0) {
+        blockedReason = "rows=0";
+      } else if (prevSnapshotCount > 0) {
+        const minByRatio = Math.ceil(prevSnapshotCount * fullRewriteMinRatio);
+        const minByDrop = Math.max(0, prevSnapshotCount - fullRewriteMaxDrop);
+        const passByRatio = rows.length >= minByRatio;
+        const passByDrop = rows.length >= minByDrop;
+
+        if (!passByRatio && !passByDrop) {
+          blockedReason =
+            `rows=${rows.length} < minByRatio=${minByRatio} and < minByDrop=${minByDrop} ` +
+            `(prev=${prevSnapshotCount})`;
+        }
+      }
+
+      if (blockedReason) {
+        hotelScheduledFullRewrite = false;
+        hotelChangedOnlyEffective = false; // fallback: 全量 upsert（不清表、不用 changedOnly）
+        hotelCancelScanEffective = false;
+        console.log("⚠️ FULL_REWRITE_BLOCKED_FALLBACK_TO_UPSERT:", hotelId, blockedReason);
+      } else {
+        console.log("✅ FULL_REWRITE_ALLOWED:", hotelId, `rows=${rows.length}`, `prevSnapshot=${prevSnapshotCount}`);
+      }
+    }
+
+    console.log("🧾 cancelScan:", hotelCancelScanEffective ? "ON" : "OFF", "| cancelIncoming(unique) =", uniqueCancelled.length);
 
     let rowsToSync = rows;
 
-    if (changedOnlyEffective) {
-      const snapshotPath = snapshotPathFor(hotelId);
-      const prev = readSnapshotSafe(snapshotPath);
+    if (hotelChangedOnlyEffective) {
+      const prev = prevSnapshot;
       const next = {};
       const out = [];
 
@@ -1128,6 +1177,15 @@ function stableSig(row) {
 
       rowsToSync = out;
       console.log("✅ changedOnly=1:", hotelId, "changed rows =", out.length, "snapshot =", snapshotPath);
+    } else {
+      // 非 changedOnly（含 full rewrite 與 blocked fallback）仍更新 snapshot，供下輪完整性檢查
+      const next = {};
+      for (const r of rows) {
+        const k = stableKey(r);
+        if (!k) continue;
+        next[k] = stableSig(r);
+      }
+      writeSnapshotSafe(snapshotPath, next);
     }
 
     await syncToSheetOrThrow(
@@ -1139,14 +1197,14 @@ function stableSig(row) {
         columns,
         rows: rowsToSync,
         cancelledOrderNos: uniqueCancelled,
-        replaceAllRows: scheduledFullRewrite,
+        replaceAllRows: hotelScheduledFullRewrite,
         rangeStr
       },
       hotelId,
       hotelName
     );
 
-    console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", scheduledFullRewrite ? "FULL_REWRITE" : (changedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
+    console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", hotelScheduledFullRewrite ? "FULL_REWRITE" : (hotelChangedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
 
     if (!rows.length) {
       console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
