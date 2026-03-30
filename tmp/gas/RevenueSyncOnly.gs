@@ -159,6 +159,13 @@ function _sortRevenueRows_(sheet, startRow) {
   }
 }
 
+function _setTaipeiSyncTimestamp_(sheet) {
+  if (!sheet) return;
+  const now = new Date();
+  const ts = Utilities.formatDate(now, "Asia/Taipei", "yyyy/MM/dd HH:mm:ss");
+  sheet.getRange("B7").setValue("最後更新時間（台北）：" + ts);
+}
+
 /**
  * ✅ 以「訂單編號欄(B)」判定最後一筆有效資料列（避免被公式長尾撐大）
  */
@@ -274,6 +281,9 @@ function syncRoomToRevenueOnly() {
       _ensureRevenueStartRowPadding_(revSheet);
       Logger.log("🆕 建立營收分頁：" + revenueSheetName);
     }
+
+    // ✅ 每次同步執行時，更新 B7 顯示台北時區的最後更新時間
+    _setTaipeiSyncTimestamp_(revSheet);
 
     const startRowRev = _getRevenueStartRow_(revSheet);
     const revLastDataRow = _getLastDataRowByOrderId_(revSheet, startRowRev);
