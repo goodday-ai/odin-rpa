@@ -110,7 +110,7 @@ function _syncOne_(ss, item) {
     const sh = _getOrCreateSheet_(ss, sheetName);
 
     const layout = _ensureHeaderRow_(sh, columns);
-    const dataStartRow = layout && layout.dataStartRow ? layout.dataStartRow : 2;
+    const dataStartRow = layout && layout.dataStartRow ? layout.dataStartRow : 3;
 
     const clearInfo = replaceAllRows ? _clearDataRows_(sh, dataStartRow) : { ok: true, cleared: 0 };
     const delInfo = replaceAllRows
@@ -141,7 +141,7 @@ function _syncOne_(ss, item) {
 
 function _clearDataRows_(sh, dataStartRow) {
   try {
-    const startRow = Number(dataStartRow || 2);
+    const startRow = Number(dataStartRow || 3);
     const lastRow = sh.getLastRow();
     if (lastRow < startRow) return { ok: true, cleared: 0 };
 
@@ -222,7 +222,7 @@ function _ensureHeaderRow_(sh, columns) {
   // ✅ 日期欄：顯示格式統一 yyyy/MM/dd（避免同欄混用 - 與 /）
   _ensureDateFormatColumns_(sh, columns, ["訂單日期", "入住日期", "退房日期"]);
 
-  return { hasHeader: hasHeader, dataStartRow: hasHeader ? 3 : 2 };
+  return { hasHeader: hasHeader, dataStartRow: 3 };
 }
 
 function _ensurePlainTextColumns_(sh, columns, colNames) {
@@ -271,7 +271,7 @@ function _setUpdatedTimestamp_(sh) {
 
 function _deleteCancelled_(sh, columns, cancelledOrderNos, dataStartRow) {
   try {
-    const startRow = Number(dataStartRow || 2);
+    const startRow = Number(dataStartRow || 3);
     const keyName = "訂單編號";
     const keyColIndex = columns.indexOf(keyName);
     if (keyColIndex === -1) return { ok: false, error: "columns missing 訂單編號" };
@@ -316,7 +316,7 @@ function _buildCancelSet_(cancelledOrderNos) {
 }
 
 function _upsertRows_(sh, columns, rows, dataStartRow) {
-  const startRow = Number(dataStartRow || 2);
+  const startRow = Number(dataStartRow || 3);
 
   const keyName = "訂單編號";
   const keyColIndex = columns.indexOf(keyName);
@@ -412,7 +412,7 @@ function _rowEquals_(a, b) {
 
 function _sortSheet_(sh, columns, dataStartRow) {
   try {
-    const startRow = Number(dataStartRow || 2);
+    const startRow = Number(dataStartRow || 3);
     const lastRow = sh.getLastRow();
     if (lastRow < startRow) return { ok: true, skipped: true, reason: "no data rows" };
 
