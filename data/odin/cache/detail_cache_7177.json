@@ -203,12 +203,6 @@
     "phone": "0985164868",
     "updatedAt": "2026-03-31"
   },
-  "OBE15560717726032502": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "101(雙)",
-    "phone": "0938787532",
-    "updatedAt": "2026-03-29"
-  },
   "OBE05910717726032403": {
     "projectName": "OTA與官網原始價格",
     "roomType": "203(雙)",
@@ -263,35 +257,17 @@
     "phone": "0921103947",
     "updatedAt": "2026-03-31"
   },
-  "OBE33090717726032702": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "205(三)｜102(四)",
-    "phone": "0968192355",
-    "updatedAt": "2026-03-30"
-  },
   "OBE35200717726032701": {
     "projectName": "同業價格",
     "roomType": "205(三)",
     "phone": "0925398269",
     "updatedAt": "2026-03-31"
   },
-  "OBE94220717726032703": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "305(三)",
-    "phone": "0968192355",
-    "updatedAt": "2026-03-29"
-  },
   "OBE42940717726032901": {
     "projectName": "官網專屬優惠",
     "roomType": "102(四)",
     "phone": "0952189882",
     "updatedAt": "2026-03-31"
-  },
-  "OBE75430717726032804": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "101(雙)",
-    "phone": "0968192355",
-    "updatedAt": "2026-03-29"
   },
   "OBE24570717726032704": {
     "projectName": "OTA與官網原始價格",
@@ -317,12 +293,6 @@
     "phone": "0925221586",
     "updatedAt": "2026-03-31"
   },
-  "OBE73580717726032903": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "203(雙)",
-    "phone": "",
-    "updatedAt": "2026-03-30"
-  },
   "OBE37170717726032904": {
     "projectName": "OTA與官網原始價格",
     "roomType": "101(雙)｜201(雙)｜203(雙)",
@@ -339,6 +309,12 @@
     "projectName": "OTA與官網原始價格",
     "roomType": "201(雙)",
     "phone": "0958392520",
+    "updatedAt": "2026-03-31"
+  },
+  "OBE63790717726033102": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "102(四)",
+    "phone": "0937501545",
     "updatedAt": "2026-03-31"
   }
 }

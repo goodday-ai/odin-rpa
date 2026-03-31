@@ -41,12 +41,6 @@
     "phone": "",
     "updatedAt": "2026-03-31"
   },
-  "OBE16680640525122703": {
-    "projectName": "Agoda",
-    "roomType": "2F",
-    "phone": "",
-    "updatedAt": "2026-03-19"
-  },
   "OBE28160640525122704": {
     "projectName": "Agoda",
     "roomType": "3F",
@@ -64,12 +58,6 @@
     "roomType": "3F",
     "phone": "0954087545",
     "updatedAt": "2026-03-31"
-  },
-  "OBE12330640525122802": {
-    "projectName": "Agoda",
-    "roomType": "3F｜4F",
-    "phone": "0+886989449681",
-    "updatedAt": "2026-03-04"
   },
   "OBE73050640525122901": {
     "projectName": "Agoda",
@@ -148,12 +136,6 @@
     "roomType": "3F",
     "phone": "0936581516",
     "updatedAt": "2026-03-31"
-  },
-  "OBE31320640526010701": {
-    "projectName": "Agoda",
-    "roomType": "3F｜4F｜5F",
-    "phone": "0911293190",
-    "updatedAt": "2026-03-04"
   },
   "OBE89560640526010702": {
     "projectName": "限量優惠專案(連住)",
@@ -287,12 +269,6 @@
     "phone": "0937522036",
     "updatedAt": "2026-03-31"
   },
-  "OBE67530640526012201": {
-    "projectName": "Agoda",
-    "roomType": "3F｜4F",
-    "phone": "85285292360463",
-    "updatedAt": "2026-03-17"
-  },
   "OBE27540640526012501": {
     "projectName": "限量優惠專案(連住)",
     "roomType": "4F",
@@ -383,12 +359,6 @@
     "phone": "",
     "updatedAt": "2026-03-31"
   },
-  "OBE77980640526021901": {
-    "projectName": "Booking",
-    "roomType": "3F",
-    "phone": "+85295219475",
-    "updatedAt": "2026-03-20"
-  },
   "OBE49730640526021902": {
     "projectName": "限量優惠專案(連住)",
     "roomType": "3F",
@@ -437,12 +407,6 @@
     "phone": "0937548142",
     "updatedAt": "2026-03-31"
   },
-  "OBE75290640526022601": {
-    "projectName": "Booking",
-    "roomType": "5F",
-    "phone": "",
-    "updatedAt": "2026-03-04"
-  },
   "OBE16730640526022701": {
     "projectName": "Booking",
     "roomType": "5F",
@@ -485,23 +449,11 @@
     "phone": "+85297070811",
     "updatedAt": "2026-03-31"
   },
-  "OBE71930640526030303": {
-    "projectName": "Booking",
-    "roomType": "4F｜5F",
-    "phone": "0952741256",
-    "updatedAt": "2026-03-04"
-  },
   "OBE77640640526030304": {
     "projectName": "Booking",
     "roomType": "2F",
     "phone": "+393332544218",
     "updatedAt": "2026-03-31"
-  },
-  "OBE28900640526030402": {
-    "projectName": "Booking",
-    "roomType": "3F",
-    "phone": "0919921413",
-    "updatedAt": "2026-03-04"
   },
   "OBE03560640526030403": {
     "projectName": "限量優惠專案(連住)",
@@ -581,12 +533,6 @@
     "phone": "0970618127",
     "updatedAt": "2026-03-31"
   },
-  "OBE15000640526031401": {
-    "projectName": "Booking",
-    "roomType": "5F",
-    "phone": "0911745131",
-    "updatedAt": "2026-03-22"
-  },
   "OBE80200640526031402": {
     "projectName": "Booking",
     "roomType": "5F",
@@ -617,23 +563,11 @@
     "phone": "85292360463",
     "updatedAt": "2026-03-31"
   },
-  "OBE35300640526031703": {
-    "projectName": "Booking",
-    "roomType": "3F",
-    "phone": "0932509690",
-    "updatedAt": "2026-03-18"
-  },
   "OBE40830640526031702": {
     "projectName": "限量優惠專案(連住)",
     "roomType": "2F｜4F",
     "phone": "0976200500",
     "updatedAt": "2026-03-31"
-  },
-  "OBE65540640526031801": {
-    "projectName": "Booking",
-    "roomType": "2F",
-    "phone": "093250966990",
-    "updatedAt": "2026-03-20"
   },
   "OBE76450640526031802": {
     "projectName": "Booking",
@@ -646,12 +580,6 @@
     "roomType": "3F",
     "phone": "0955586888",
     "updatedAt": "2026-03-31"
-  },
-  "OBE55140640526031901": {
-    "projectName": "Booking",
-    "roomType": "3F",
-    "phone": "0916534173",
-    "updatedAt": "2026-03-20"
   },
   "OBE66270640526032001": {
     "projectName": "Booking",

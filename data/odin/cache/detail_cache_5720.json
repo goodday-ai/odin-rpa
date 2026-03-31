@@ -119,12 +119,6 @@
     "phone": "0916595856",
     "updatedAt": "2026-03-31"
   },
-  "OBE99150572026030201": {
-    "projectName": "Booking",
-    "roomType": "包棟",
-    "phone": "",
-    "updatedAt": "2026-03-04"
-  },
   "OBE18130572026030202": {
     "projectName": "獨享包棟",
     "roomType": "包棟",
@@ -191,12 +185,6 @@
     "phone": "0958079338",
     "updatedAt": "2026-03-31"
   },
-  "OBE17590572026032001": {
-    "projectName": "獨享包棟",
-    "roomType": "包棟",
-    "phone": "0933373395",
-    "updatedAt": "2026-03-22"
-  },
   "OBE08660572026032301": {
     "projectName": "獨享包棟",
     "roomType": "包棟",
@@ -214,11 +202,5 @@
     "roomType": "包棟",
     "phone": "0932583242",
     "updatedAt": "2026-03-31"
-  },
-  "OBE33820572026032801": {
-    "projectName": "Booking",
-    "roomType": "包棟",
-    "phone": "0900753501",
-    "updatedAt": "2026-03-28"
   }
 }

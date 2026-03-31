@@ -1,10 +1,4 @@
 {
-  "OBE66780653726031401": {
-    "projectName": "包棟",
-    "roomType": "三房包棟",
-    "phone": "0980401411",
-    "updatedAt": "2026-03-17"
-  },
   "OBE62340653726031501": {
     "projectName": "包棟",
     "roomType": "三房包棟",
@@ -47,29 +41,11 @@
     "phone": "0923176571",
     "updatedAt": "2026-03-31"
   },
-  "OBE51430653726031508": {
-    "projectName": "官網限定優惠",
-    "roomType": "三房包棟",
-    "phone": "0930970807",
-    "updatedAt": "2026-03-16"
-  },
-  "OBE62230653726031602": {
-    "projectName": "包棟",
-    "roomType": "三房包棟",
-    "phone": "0985680298",
-    "updatedAt": "2026-03-17"
-  },
   "OBE73250653726031601": {
     "projectName": "包棟",
     "roomType": "三房包棟",
     "phone": "0963619668",
     "updatedAt": "2026-03-31"
-  },
-  "OBE48750653726031603": {
-    "projectName": "Booking.com",
-    "roomType": "三房包棟",
-    "phone": "0981010848",
-    "updatedAt": "2026-03-23"
   },
   "OBE83710653726031701": {
     "projectName": "包棟",
@@ -177,6 +153,18 @@
     "projectName": "包棟",
     "roomType": "三房包棟",
     "phone": "0980287959",
+    "updatedAt": "2026-03-31"
+  },
+  "OBE54640653726033101": {
+    "projectName": "官網限定優惠",
+    "roomType": "三房包棟",
+    "phone": "0919549932",
+    "updatedAt": "2026-03-31"
+  },
+  "OBE84670653726033102": {
+    "projectName": "Booking.com",
+    "roomType": "三房包棟",
+    "phone": "0912916537",
     "updatedAt": "2026-03-31"
   }
 }
