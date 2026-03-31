@@ -66,12 +66,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -372,7 +372,7 @@ jobs:
 
       - name: Upload raw debug artifact (06:00 or forced)
         if: success() && steps.odin_artifact_gate.outputs.upload == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: odin-raw-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -404,7 +404,7 @@ jobs:
 
       - name: Upload artifacts (failure only)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: odin-out-failure
           path: out
