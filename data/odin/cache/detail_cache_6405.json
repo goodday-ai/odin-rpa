@@ -664,5 +664,17 @@
     "roomType": "3F｜4F｜5F",
     "phone": "0937651730",
     "updatedAt": "2026-03-31"
+  },
+  "OBE02070640526033102": {
+    "projectName": "限量優惠專案(連住)",
+    "roomType": "2F",
+    "phone": "0916855663",
+    "updatedAt": "2026-04-01"
+  },
+  "OBE96370640526033103": {
+    "projectName": "Booking",
+    "roomType": "3F",
+    "phone": "",
+    "updatedAt": "2026-04-01"
   }
 }
