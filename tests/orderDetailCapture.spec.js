@@ -173,6 +173,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     ? Math.max(detailThrottleMs, refreshThrottleMs)
     : detailThrottleMs;
   const detailConcurrency = clampInt(process.env.ODIN_DETAIL_CONCURRENCY || "6", 1, 20, 6);
+  const detailCacheStaleDays = clampInt(process.env.ODIN_DETAIL_CACHE_STALE_DAYS || "14", 0, 3650, 14);
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
   function _normalizeUrl_(raw) {
@@ -732,6 +733,60 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return String(row["訂單編號"] || "");
   }
 
+  function parseYmdSafe(s) {
+    const t = String(s || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+    const d = parseISO(t);
+    if (!isValid(d)) return null;
+    return d;
+  }
+
+  function diffDaysFromTodayTaipei(ymd) {
+    const target = parseYmdSafe(ymd);
+    const today = parseYmdSafe(taipeiTodayYMD());
+    if (!target || !today) return Number.POSITIVE_INFINITY;
+
+    const utcTarget = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+    const utcToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const diffMs = utcToday - utcTarget;
+    return Math.floor(diffMs / 86400000);
+  }
+
+  function pruneDetailCache(detailCacheMap, rows, uniqueCancelled) {
+    if (!detailCacheMap || typeof detailCacheMap !== "object") {
+      return { removedCancelled: 0, removedStale: 0, staleDays: detailCacheStaleDays };
+    }
+
+    const activeKeys = new Set(
+      (Array.isArray(rows) ? rows : [])
+        .map((r) => stableKey(r))
+        .filter(Boolean)
+    );
+    const cancelledSet = new Set((Array.isArray(uniqueCancelled) ? uniqueCancelled : []).map((x) => String(x || "").trim()).filter(Boolean));
+
+    let removedCancelled = 0;
+    let removedStale = 0;
+
+    for (const key of Object.keys(detailCacheMap)) {
+      if (activeKeys.has(key)) continue;
+
+      if (cancelledSet.has(key)) {
+        delete detailCacheMap[key];
+        removedCancelled++;
+        continue;
+      }
+
+      const updatedAt = detailCacheMap[key] && detailCacheMap[key].updatedAt ? detailCacheMap[key].updatedAt : "";
+      const staleDays = diffDaysFromTodayTaipei(updatedAt);
+      if (staleDays > detailCacheStaleDays) {
+        delete detailCacheMap[key];
+        removedStale++;
+      }
+    }
+
+    return { removedCancelled, removedStale, staleDays: detailCacheStaleDays };
+  }
+
 // =======================================================
 // ✅ 訂單變動判斷（Snapshot Signature）
 // -------------------------------------------------------
@@ -1099,6 +1154,7 @@ function stableSig(row) {
     }
 
     const uniqueCancelled = Array.from(new Set(cancelledOrderNos));
+    const pruneResult = pruneDetailCache(detailCacheMap, rows, uniqueCancelled);
 
     // ✅ 先落 out/
     const sheetReadyPath = `${outDir}/orders_sheet_ready_${hotelId}.json`;
@@ -1118,6 +1174,7 @@ function stableSig(row) {
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
     console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
+    console.log("🧹 detailCache housekeeping:", hotelId, pruneResult);
     const snapshotPath = snapshotPathFor(hotelId);
     const prevSnapshot = readSnapshotSafe(snapshotPath);
     const prevSnapshotCount = Object.keys(prevSnapshot).length;
