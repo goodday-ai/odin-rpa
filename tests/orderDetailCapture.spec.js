@@ -754,7 +754,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   function pruneDetailCache(detailCacheMap, rows, uniqueCancelled) {
     if (!detailCacheMap || typeof detailCacheMap !== "object") {
-      return { removedCancelled: 0, removedStale: 0, staleDays: detailCacheStaleDays };
+      return {
+        removedCancelled: 0,
+        removedStale: 0,
+        staleDays: detailCacheStaleDays,
+        activeRowsCount: 0,
+        cacheKeysBefore: 0,
+        cacheKeysAfter: 0
+      };
     }
 
     const activeKeys = new Set(
@@ -763,6 +770,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
         .filter(Boolean)
     );
     const cancelledSet = new Set((Array.isArray(uniqueCancelled) ? uniqueCancelled : []).map((x) => String(x || "").trim()).filter(Boolean));
+    const cacheKeysBefore = Object.keys(detailCacheMap).length;
 
     let removedCancelled = 0;
     let removedStale = 0;
@@ -778,13 +786,21 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
       const updatedAt = detailCacheMap[key] && detailCacheMap[key].updatedAt ? detailCacheMap[key].updatedAt : "";
       const staleDays = diffDaysFromTodayTaipei(updatedAt);
-      if (staleDays > detailCacheStaleDays) {
+      if (detailCacheStaleDays > 0 && staleDays > detailCacheStaleDays) {
         delete detailCacheMap[key];
         removedStale++;
       }
     }
 
-    return { removedCancelled, removedStale, staleDays: detailCacheStaleDays };
+    const cacheKeysAfter = Object.keys(detailCacheMap).length;
+    return {
+      removedCancelled,
+      removedStale,
+      staleDays: detailCacheStaleDays,
+      activeRowsCount: activeKeys.size,
+      cacheKeysBefore,
+      cacheKeysAfter
+    };
   }
 
 // =======================================================
