@@ -316,5 +316,11 @@
     "roomType": "102(四)",
     "phone": "0937501545",
     "updatedAt": "2026-04-01"
+  },
+  "OBE92970717726040101": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "303(雙)",
+    "phone": "",
+    "updatedAt": "2026-04-01"
   }
 }
