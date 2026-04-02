@@ -490,5 +490,17 @@
     "roomType": "5F",
     "phone": "0989129947",
     "updatedAt": "2026-04-02"
+  },
+  "OBE88140672326040202": {
+    "projectName": "二臥室套房",
+    "roomType": "4F",
+    "phone": "0973666215",
+    "updatedAt": "2026-04-02"
+  },
+  "OBE75850672326040203": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "3F",
+    "phone": "0918033010",
+    "updatedAt": "2026-04-02"
   }
 }
