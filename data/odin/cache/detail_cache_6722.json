@@ -100,5 +100,17 @@
     "roomType": "包棟",
     "phone": "0976867792",
     "updatedAt": "2026-04-03"
+  },
+  "OBE99880672226040301": {
+    "projectName": "連住專案",
+    "roomType": "包棟",
+    "phone": "0917935750",
+    "updatedAt": "2026-04-03"
+  },
+  "OBE27710672226040302": {
+    "projectName": "Booking",
+    "roomType": "201｜202｜203",
+    "phone": "+622035640799",
+    "updatedAt": "2026-04-03"
   }
 }
