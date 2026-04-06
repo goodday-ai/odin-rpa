@@ -286,5 +286,17 @@
     "roomType": "包棟",
     "phone": "0978186787",
     "updatedAt": "2026-04-06"
+  },
+  "OBE76730672126040601": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "包棟",
+    "phone": "0970502549",
+    "updatedAt": "2026-04-06"
+  },
+  "OBE31490672126040602": {
+    "projectName": "官網專屬優惠",
+    "roomType": "包棟",
+    "phone": "0920279462",
+    "updatedAt": "2026-04-06"
   }
 }
