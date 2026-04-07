@@ -113,12 +113,6 @@
     "phone": "0921549767",
     "updatedAt": "2026-04-07"
   },
-  "OBE56800581626010601": {
-    "projectName": "OTA串接專案",
-    "roomType": "O｜Z3",
-    "phone": "0968905550",
-    "updatedAt": "2026-04-07"
-  },
   "OBE20100581626010701": {
     "projectName": "OTA串接專案",
     "roomType": "M1｜M3｜Z1｜Z3",
@@ -1157,12 +1151,6 @@
     "phone": "0911991138",
     "updatedAt": "2026-04-07"
   },
-  "OBE68170581626040106": {
-    "projectName": "OTA串接專案",
-    "roomType": "M3",
-    "phone": "0911991138",
-    "updatedAt": "2026-04-07"
-  },
   "OBE44260581626040107": {
     "projectName": "OTA串接專案",
     "roomType": "M1",
@@ -1257,6 +1245,18 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3｜O",
     "phone": "",
+    "updatedAt": "2026-04-07"
+  },
+  "OBE77400581626040701": {
+    "projectName": "OTA串接專案",
+    "roomType": "Z2",
+    "phone": "0911991138",
+    "updatedAt": "2026-04-07"
+  },
+  "OBE16610581626040702": {
+    "projectName": "OTA串接專案",
+    "roomType": "1",
+    "phone": "0952176527",
     "updatedAt": "2026-04-07"
   }
 }
