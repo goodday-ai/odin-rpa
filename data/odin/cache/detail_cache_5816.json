@@ -1276,5 +1276,17 @@
     "roomType": "M1｜M3",
     "phone": "0908359501",
     "updatedAt": "2026-04-08"
+  },
+  "OBE00350581626040805": {
+    "projectName": "OTA串接專案",
+    "roomType": "Z3｜O",
+    "phone": "0907092901",
+    "updatedAt": "2026-04-08"
+  },
+  "OBE05130581626040804": {
+    "projectName": "OTA串接專案",
+    "roomType": "1｜M3",
+    "phone": "0965137010",
+    "updatedAt": "2026-04-08"
   }
 }
