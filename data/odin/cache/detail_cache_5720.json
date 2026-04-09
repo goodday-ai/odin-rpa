@@ -214,5 +214,11 @@
     "roomType": "3F",
     "phone": "",
     "updatedAt": "2026-04-09"
+  },
+  "OBE82870572026040901": {
+    "projectName": "獨享包棟",
+    "roomType": "包棟",
+    "phone": "0903973200",
+    "updatedAt": "2026-04-09"
   }
 }
