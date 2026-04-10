@@ -47,6 +47,9 @@ jobs:
 
       # ✅ 多館別輪巡節流（毫秒）
       ODIN_THROTTLE_MS: "250"
+      # ✅ 多館別輪巡節流抖動（毫秒，min/max）
+      ODIN_HOTEL_THROTTLE_MIN_MS: "200"
+      ODIN_HOTEL_THROTTLE_MAX_MS: "600"
 
       # ✅ 強制：永遠寫入 Sheet
       ODIN_WRITE_SHEET: "1"
@@ -180,6 +183,13 @@ jobs:
           ODIN_DETAIL_REFRESH_HOUR: ${{ secrets.ODIN_DETAIL_REFRESH_HOUR || vars.ODIN_DETAIL_REFRESH_HOUR }}
           ODIN_DETAIL_THROTTLE_MS: ${{ secrets.ODIN_DETAIL_THROTTLE_MS || vars.ODIN_DETAIL_THROTTLE_MS }}
           ODIN_DETAIL_REFRESH_THROTTLE_MS: ${{ secrets.ODIN_DETAIL_REFRESH_THROTTLE_MS || vars.ODIN_DETAIL_REFRESH_THROTTLE_MS }}
+          ODIN_DETAIL_CONCURRENCY: ${{ secrets.ODIN_DETAIL_CONCURRENCY || vars.ODIN_DETAIL_CONCURRENCY }}
+          ODIN_DETAIL_THROTTLE_MIN_MS: ${{ secrets.ODIN_DETAIL_THROTTLE_MIN_MS || vars.ODIN_DETAIL_THROTTLE_MIN_MS }}
+          ODIN_DETAIL_THROTTLE_MAX_MS: ${{ secrets.ODIN_DETAIL_THROTTLE_MAX_MS || vars.ODIN_DETAIL_THROTTLE_MAX_MS }}
+          ODIN_HOTEL_THROTTLE_MIN_MS: ${{ secrets.ODIN_HOTEL_THROTTLE_MIN_MS || vars.ODIN_HOTEL_THROTTLE_MIN_MS }}
+          ODIN_HOTEL_THROTTLE_MAX_MS: ${{ secrets.ODIN_HOTEL_THROTTLE_MAX_MS || vars.ODIN_HOTEL_THROTTLE_MAX_MS }}
+          ODIN_TEST_TIMEOUT_MS: ${{ secrets.ODIN_TEST_TIMEOUT_MS || vars.ODIN_TEST_TIMEOUT_MS }}
+          ODIN_TEST_RETRIES: ${{ secrets.ODIN_TEST_RETRIES || vars.ODIN_TEST_RETRIES || '0' }}
         run: |
           echo "Event schedule: '${{ github.event.schedule }}'"
           echo "Runtime TZ=${TZ:-unset}, now=$(date '+%Y-%m-%d %H:%M:%S %z')"
@@ -211,8 +221,15 @@ jobs:
           echo "ODIN_DETAIL_REFRESH_HOUR=${ODIN_DETAIL_REFRESH_HOUR:-unset}"
           echo "ODIN_DETAIL_THROTTLE_MS=${ODIN_DETAIL_THROTTLE_MS:-unset}"
           echo "ODIN_DETAIL_REFRESH_THROTTLE_MS=${ODIN_DETAIL_REFRESH_THROTTLE_MS:-unset}"
+          echo "ODIN_DETAIL_CONCURRENCY=${ODIN_DETAIL_CONCURRENCY:-unset}"
+          echo "ODIN_DETAIL_THROTTLE_MIN_MS=${ODIN_DETAIL_THROTTLE_MIN_MS:-unset}"
+          echo "ODIN_DETAIL_THROTTLE_MAX_MS=${ODIN_DETAIL_THROTTLE_MAX_MS:-unset}"
+          echo "ODIN_HOTEL_THROTTLE_MIN_MS=${ODIN_HOTEL_THROTTLE_MIN_MS:-unset}"
+          echo "ODIN_HOTEL_THROTTLE_MAX_MS=${ODIN_HOTEL_THROTTLE_MAX_MS:-unset}"
+          echo "ODIN_TEST_TIMEOUT_MS=${ODIN_TEST_TIMEOUT_MS:-unset}"
+          echo "ODIN_TEST_RETRIES=${ODIN_TEST_RETRIES:-unset}"
 
-          npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout=240000
+          npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout="${ODIN_TEST_TIMEOUT_MS:-240000}"
 
           # ✅ 補強 2：GAS 回應若有 deleteError / ok=false → 直接 fail
           # 依你目前的輸出習慣：out 裡會有 orders_sheet_ready_*.json（或 changed 版本）
