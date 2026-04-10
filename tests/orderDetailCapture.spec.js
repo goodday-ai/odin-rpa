@@ -71,6 +71,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (v > max) return max;
     return v;
   }
+  // ✅ 中文註解：在節流與重試等策略上加入小抖動，降低固定節奏特徵。
+  function randomIntInclusive(min, max) {
+    const a = Math.trunc(Number(min));
+    const b = Math.trunc(Number(max));
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    const span = hi - lo + 1;
+    return lo + Math.floor(Math.random() * span);
+  }
 
   function isYearString(s) {
     const t = String(s || "").trim();
@@ -107,6 +117,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   const throttleMsRaw = Number(process.env.ODIN_THROTTLE_MS || "250");
   const throttleMs = Number.isFinite(throttleMsRaw) ? Math.max(0, Math.min(3000, throttleMsRaw)) : 250;
+  const hotelThrottleMinMs = clampInt(process.env.ODIN_HOTEL_THROTTLE_MIN_MS || String(throttleMs), 0, 5000, throttleMs);
+  const hotelThrottleMaxMs = clampInt(process.env.ODIN_HOTEL_THROTTLE_MAX_MS || String(hotelThrottleMinMs), 0, 5000, hotelThrottleMinMs);
 
   // ✅ API 請求逾時（避免單一請求拖到整體測試逾時）
   const apiTimeoutMsRaw = Number(process.env.ODIN_API_TIMEOUT_MS || "20000");
@@ -118,6 +130,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const fetchDetail = String(process.env.ODIN_FETCH_DETAIL || "1") === "1";
   const detailThrottleMsRaw = Number(process.env.ODIN_DETAIL_THROTTLE_MS || "0");
   const detailThrottleMs = Number.isFinite(detailThrottleMsRaw) ? Math.max(0, Math.min(3000, detailThrottleMsRaw)) : 0;
+  const detailThrottleMinMsBase = clampInt(process.env.ODIN_DETAIL_THROTTLE_MIN_MS || String(detailThrottleMs), 0, 5000, detailThrottleMs);
+  const detailThrottleMaxMsBase = clampInt(process.env.ODIN_DETAIL_THROTTLE_MAX_MS || String(detailThrottleMinMsBase), 0, 5000, detailThrottleMinMsBase);
 
   // ✅ 策略一（寫入 Sheet）：GAS Web App
   const writeSheet = String(process.env.ODIN_WRITE_SHEET || "1") === "1";
@@ -169,10 +183,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // - 非 full refresh 時段沿用 ODIN_DETAIL_THROTTLE_MS
   const refreshThrottleMsRaw = Number(process.env.ODIN_DETAIL_REFRESH_THROTTLE_MS || "800");
   const refreshThrottleMs = Number.isFinite(refreshThrottleMsRaw) ? Math.max(0, Math.min(3000, refreshThrottleMsRaw)) : 800;
-  const effectiveDetailThrottleMs = isScheduledDetailRefreshWindow
-    ? Math.max(detailThrottleMs, refreshThrottleMs)
-    : detailThrottleMs;
-  const detailConcurrency = clampInt(process.env.ODIN_DETAIL_CONCURRENCY || "6", 1, 20, 6);
+  const refreshDetailThrottleMinMs = isScheduledDetailRefreshWindow ? Math.max(detailThrottleMinMsBase, refreshThrottleMs) : detailThrottleMinMsBase;
+  const refreshDetailThrottleMaxMs = isScheduledDetailRefreshWindow ? Math.max(detailThrottleMaxMsBase, refreshThrottleMs) : detailThrottleMaxMsBase;
+  const detailConcurrency = clampInt(process.env.ODIN_DETAIL_CONCURRENCY || "3", 1, 20, 3);
   const detailCacheStaleDays = clampInt(process.env.ODIN_DETAIL_CACHE_STALE_DAYS || "14", 0, 3650, 14);
 
   // --- URL 治理：去空白/去引號/診斷資訊（不洩漏內容） ---
@@ -333,6 +346,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     sortBy || "(empty)",
     "| cancelScan=",
     cancelScanBase ? `ON(${cancelOrderStatusList.join(",") || "empty"})` : "OFF",
+    "| changedOnly(raw/resolved)=",
+    `${String(process.env.ODIN_CHANGED_ONLY || "") || "(empty)"}/${hotelIds.length ? String(changedOnlyBase) : String(changedOnly)}`,
+    "| cancelScan(raw/resolved)=",
+    `${String(process.env.ODIN_CANCEL_SCAN || "") || "(empty)"}/${String(cancelScanBase)}`,
+    "| detailForceRefresh(raw/resolved)=",
+    `${String(process.env.ODIN_DETAIL_FORCE_REFRESH || "") || "(empty)"}/${String(detailForceRefreshEffective)}`,
+    "| modeReason=",
+    scheduledFullRewriteByClock ? "scheduled_full_rewrite_window" : "normal_mode",
     "| taipeiHour=",
     nowTaipeiHour,
     "| detailRefreshHour=",
@@ -349,8 +370,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     fullRewriteMaxDrop,
     "| detailCache=",
     fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
-    "| detailThrottleMs=",
-    effectiveDetailThrottleMs,
+    "| detailThrottleRangeMs=",
+    `${refreshDetailThrottleMinMs}-${refreshDetailThrottleMaxMs}`,
+    "| hotelThrottleRangeMs=",
+    `${hotelThrottleMinMs}-${hotelThrottleMaxMs}`,
     "| detailConcurrency=",
     detailConcurrency,
     "| apiTimeoutMs=",
@@ -466,6 +489,18 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     } catch (e) {
       return { ok: false, httpStatus: 0, json: {}, url, error: String(e && e.message ? e.message : e) };
     }
+  }
+
+  // ✅ 中文註解：偵測疑似風控事件，遇到後本輪保守停止後續館別，避免激進重打。
+  function detectAnomalyFromResponse(url, httpStatus, body) {
+    const text = JSON.stringify(body || {}).toLowerCase();
+    const u = String(url || "").toLowerCase();
+    const redirectLike = u.includes("/login") || u.includes("/challenge");
+    const challengeLike = text.includes("challenge") || text.includes("captcha");
+    if (httpStatus === 403 || httpStatus === 429) return { hit: true, reason: `http_${httpStatus}` };
+    if (redirectLike) return { hit: true, reason: "unexpected_login_or_challenge_redirect" };
+    if (challengeLike) return { hit: true, reason: "response_contains_challenge" };
+    return { hit: false, reason: "" };
   }
 
   // =======================================================
@@ -869,11 +904,15 @@ function stableSig(row) {
       });
     } catch (e) {
       const diag = _urlDiag_(gasUrlRaw);
+      const msg = String(e && e.message ? e.message : e);
+      const msgLower = msg.toLowerCase();
+      const errType = msgLower.includes("context closed") ? "context_closed" :
+        msgLower.includes("timeout") ? "timeout" : "network_transport";
       throw new Error(
-        `GAS POST failed (request error): hotelId=${hotelId}\n` +
+        `GAS POST failed (${errType}): hotelId=${hotelId}\n` +
         "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
         `Diag: ${JSON.stringify(diag)}\n` +
-        `Err: ${String(e && e.message ? e.message : e)}`
+        `Err: ${msg}`
       );
     }
 
@@ -885,7 +924,7 @@ function stableSig(row) {
 
     if (http < 200 || http >= 300) {
       throw new Error(
-        `GAS sync failed: hotelId=${hotelId} http=${http}\n` +
+        `GAS sync failed (gas_app_response_error): hotelId=${hotelId} http=${http}\n` +
         "Tip: 去 Apps Script → Executions 看伺服端錯誤\n" +
         `Body: ${text.slice(0, 800)}`
       );
@@ -893,7 +932,7 @@ function stableSig(row) {
 
     if (!j || j.ok !== true) {
       throw new Error(
-        `GAS sync not ok: hotelId=${hotelId} http=${http}\n` +
+        `GAS sync not ok (gas_app_response_error): hotelId=${hotelId} http=${http}\n` +
         `Body: ${text.slice(0, 800)}`
       );
     }
@@ -932,6 +971,7 @@ function stableSig(row) {
   }
 
   async function runOneHotel(hotelId) {
+    const hotelStartedAt = Date.now();
     const hotelName = hotelNameById[String(hotelId)] || "";
     const rangeStr = buildRangeStr();
 
@@ -939,6 +979,7 @@ function stableSig(row) {
     const cancelledOrderNos = [];
     let pageNo = 1;
     let totalPages = 1;
+    const timer = { calendarListMs: 0, detailTotalMs: 0, gasSyncMs: 0 };
 
     const cancelledSkipped = { count: 0 };
     let hotelScheduledFullRewrite = scheduledFullRewriteByClock;
@@ -958,10 +999,17 @@ function stableSig(row) {
     // -----------------------------
     while (pageNo <= totalPages) {
       const listUrl = buildListUrl(hotelId, pageNo, rangeStr);
-
+      const listStartedAt = Date.now();
       const listRes = await page.request.get(listUrl, { headers: baseHeaders, timeout: apiTimeoutMs });
       const listStatus = listRes.status();
       const listJson = await listRes.json().catch(() => ({}));
+      timer.calendarListMs += Date.now() - listStartedAt;
+      const listAnomaly = detectAnomalyFromResponse(listUrl, listStatus, listJson);
+      if (listAnomaly.hit) {
+        const err = new Error(`ANOMALY_DETECTED: hotelId=${hotelId} page=${pageNo} reason=${listAnomaly.reason}`);
+        err.isOwlAnomaly = true;
+        throw err;
+      }
 
       fs.writeFileSync(
         `${outDir}/orders_calendar_list_raw_${hotelId}_p${pageNo}.json`,
@@ -1032,9 +1080,18 @@ function stableSig(row) {
         }
 
         await runWithConcurrency(detailTargets, detailConcurrency, async (order) => {
-          if (effectiveDetailThrottleMs > 0) await sleep(effectiveDetailThrottleMs);
+          const delayMs = randomIntInclusive(refreshDetailThrottleMinMs, refreshDetailThrottleMaxMs);
+          if (delayMs > 0) await sleep(delayMs);
 
+          const detailStartedAt = Date.now();
           const detailRes = await fetchOrderDetail(hotelId, order.key, baseHeaders);
+          timer.detailTotalMs += Date.now() - detailStartedAt;
+          const detailAnomaly = detectAnomalyFromResponse(detailRes.url, detailRes.httpStatus, detailRes.json);
+          if (detailAnomaly.hit) {
+            const err = new Error(`ANOMALY_DETECTED: hotelId=${hotelId} order=${order.key} reason=${detailAnomaly.reason}`);
+            err.isOwlAnomaly = true;
+            throw err;
+          }
           if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
             const extractedProject = extractProjectNameFromDetail(detailRes.json);
             const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
@@ -1264,6 +1321,7 @@ function stableSig(row) {
       writeSnapshotSafe(snapshotPath, next);
     }
 
+    const gasStartedAt = Date.now();
     await syncToSheetOrThrow(
       {
         token: sheetToken,
@@ -1279,24 +1337,49 @@ function stableSig(row) {
       hotelId,
       hotelName
     );
+    timer.gasSyncMs += Date.now() - gasStartedAt;
 
     console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", hotelScheduledFullRewrite ? "FULL_REWRITE" : (hotelChangedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
 
     if (!rows.length) {
       console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
     }
+    console.log("⏱️ hotel timing:", hotelId, {
+      calendar_list_ms: timer.calendarListMs,
+      detail_total_ms: timer.detailTotalMs,
+      gas_sync_ms: timer.gasSyncMs,
+      total_ms: Date.now() - hotelStartedAt
+    });
   }
 
   // -----------------------------
   // 5) ✅ 多館別輪巡
   // -----------------------------
   console.log("🧭 hotels to run:", hotelIds.join(","));
+  let stopRemainingHotels = false;
   for (let i = 0; i < hotelIds.length; i++) {
     const hid = hotelIds[i];
-    await runOneHotel(hid);
+    if (stopRemainingHotels) {
+      console.log("⏹️ skip hotel due to earlier anomaly:", hid);
+      continue;
+    }
+    try {
+      await runOneHotel(hid);
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      if (e && e.isOwlAnomaly) {
+        stopRemainingHotels = true;
+        console.error("🛑 OWL anomaly detected. stop remaining hotels in this run.", { hotelId: hid, error: msg });
+        throw e;
+      }
+      throw e;
+    }
 
-    if (i < hotelIds.length - 1 && throttleMs > 0) {
-      await page.waitForTimeout(throttleMs);
+    if (i < hotelIds.length - 1) {
+      const hotelDelayMs = randomIntInclusive(hotelThrottleMinMs, hotelThrottleMaxMs);
+      if (hotelDelayMs > 0) {
+        await page.waitForTimeout(hotelDelayMs);
+      }
     }
   }
 
