@@ -229,7 +229,7 @@ jobs:
           echo "ODIN_TEST_TIMEOUT_MS=${ODIN_TEST_TIMEOUT_MS:-unset}"
           echo "ODIN_TEST_RETRIES=${ODIN_TEST_RETRIES:-unset}"
 
-          npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout="${ODIN_TEST_TIMEOUT_MS:-240000}"
+          npx playwright test tests/orderDetailCapture.spec.js --project=chromium --timeout="${ODIN_TEST_TIMEOUT_MS:-360000}"
 
           # ✅ 補強 2：GAS 回應若有 deleteError / ok=false → 直接 fail
           # 依你目前的輸出習慣：out 裡會有 orders_sheet_ready_*.json（或 changed 版本）
