@@ -146,7 +146,9 @@ function _clearDataRows_(sh, dataStartRow) {
     if (lastRow < startRow) return { ok: true, cleared: 0 };
 
     const count = lastRow - startRow + 1;
-    sh.deleteRows(startRow, count);
+    // 中文說明：改用 clearContent 只清空內容，保留資料區既有格式（置中、字型、底色等）。
+    // 不能用 deleteRows，否則會把整列移除並破壞已手動維護的版型。
+    sh.getRange(startRow, 1, count, sh.getLastColumn()).clearContent();
     return { ok: true, cleared: count };
   } catch (err) {
     return { ok: false, cleared: 0, error: String(err && err.message ? err.message : err) };
@@ -288,19 +290,29 @@ function _deleteCancelled_(sh, columns, cancelledOrderNos, dataStartRow) {
 
     const cancelSet = _buildCancelSet_(cancelledOrderNos);
 
-    const rowsToDelete = [];
+    const keptRows = [];
+    let deleted = 0;
     for (let i = 0; i < values.length; i++) {
       const rowVals = values[i];
       const key = String(rowVals[keyColIndex] || "").trim();
-      if (key && cancelSet[key]) rowsToDelete.push(startRow + i);
+      if (key && cancelSet[key]) {
+        deleted++;
+        continue;
+      }
+      keptRows.push(rowVals);
     }
 
-    if (!rowsToDelete.length) return { ok: true, deleted: 0, cancelIncoming: Object.keys(cancelSet).length };
+    if (!deleted) return { ok: true, deleted: 0, cancelIncoming: Object.keys(cancelSet).length };
 
-    rowsToDelete.sort(function(a, b) { return b - a; });
-    for (const r of rowsToDelete) sh.deleteRow(r);
+    // 中文說明：取消單刪除改為「重寫資料區」而非逐列 deleteRow，避免刪列導致樣式位移或遺失。
+    const dataRange = sh.getRange(startRow, 1, existingRowCount, columns.length);
+    dataRange.clearContent();
+    _copyTemplateFormat_(sh, startRow, existingRowCount, columns.length);
+    if (keptRows.length) {
+      sh.getRange(startRow, 1, keptRows.length, columns.length).setValues(keptRows);
+    }
 
-    return { ok: true, deleted: rowsToDelete.length, cancelIncoming: Object.keys(cancelSet).length };
+    return { ok: true, deleted: deleted, cancelIncoming: Object.keys(cancelSet).length };
   } catch (err) {
     return { ok: false, error: String(err && err.message ? err.message : err) };
   }
@@ -326,6 +338,7 @@ function _upsertRows_(sh, columns, rows, dataStartRow) {
   const existingRowCount = Math.max(0, lastRow - startRow + 1);
 
   const existingMap = {};
+  let nextAppendRow = startRow;
   if (existingRowCount > 0) {
     const range = sh.getRange(startRow, 1, existingRowCount, columns.length);
     const values = range.getValues();
@@ -333,7 +346,10 @@ function _upsertRows_(sh, columns, rows, dataStartRow) {
     for (let i = 0; i < values.length; i++) {
       const rowVals = values[i];
       const key = String(rowVals[keyColIndex] || "").trim();
-      if (key) existingMap[key] = { row: startRow + i, values: rowVals };
+      if (key) {
+        existingMap[key] = { row: startRow + i, values: rowVals };
+        nextAppendRow = Math.max(nextAppendRow, startRow + i + 1);
+      }
     }
   }
 
@@ -365,15 +381,34 @@ function _upsertRows_(sh, columns, rows, dataStartRow) {
   }
 
   if (updates.length) {
+    // 中文說明：寫值前先套用第 3 列模板格式，確保更新列也維持一致外觀。
+    for (const u of updates) _copyTemplateFormat_(sh, u.row, 1, columns.length);
     updated += _writeBatchedRowUpdates_(sh, columns.length, updates);
   }
 
   if (appends.length) {
-    sh.getRange(sh.getLastRow() + 1, 1, appends.length, columns.length).setValues(appends);
+    // 中文說明：append 前先複製模板列格式，再寫入內容，避免新列掉回預設樣式。
+    _copyTemplateFormat_(sh, nextAppendRow, appends.length, columns.length);
+    sh.getRange(nextAppendRow, 1, appends.length, columns.length).setValues(appends);
     appended += appends.length;
   }
 
   return { ok: true, updated: updated, appended: appended, skippedSame: skippedSame, totalIncoming: rows.length };
+}
+
+function _copyTemplateFormat_(sh, targetStartRow, rowCount, width) {
+  const count = Number(rowCount || 0);
+  if (count <= 0) return;
+
+  const templateRow = 3;
+  const targetRow = Number(targetStartRow || templateRow);
+  if (targetRow < 1) return;
+
+  // 中文說明：以第 3 列作為資料區模板，只複製格式不複製值。
+  sh.getRange(templateRow, 1, 1, width).copyTo(
+    sh.getRange(targetRow, 1, count, width),
+    { formatOnly: true }
+  );
 }
 
 function _alignRowToColumns_(obj, columns) {
