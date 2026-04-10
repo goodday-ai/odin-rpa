@@ -387,7 +387,11 @@ function _upsertRows_(sh, columns, rows, dataStartRow) {
   }
 
   if (appends.length) {
+    // 中文說明：append 前先補齊列數容量，避免大筆數時 setValues 目標範圍越界。
+    // 這只是預先確保工作表空間足夠，不會改變 upsert 判斷或資料內容。
+    _ensureRowCapacity_(sh, nextAppendRow, appends.length);
     // 中文說明：append 前先複製模板列格式，再寫入內容，避免新列掉回預設樣式。
+    // 即使未來 _copyTemplateFormat_ 被重構，此處仍保留一層容量保護。
     _copyTemplateFormat_(sh, nextAppendRow, appends.length, columns.length);
     sh.getRange(nextAppendRow, 1, appends.length, columns.length).setValues(appends);
     appended += appends.length;
@@ -404,11 +408,27 @@ function _copyTemplateFormat_(sh, targetStartRow, rowCount, width) {
   const targetRow = Number(targetStartRow || templateRow);
   if (targetRow < 1) return;
 
+  // 中文說明：複製格式前先補齊列數，避免 copyTo 目標範圍超出工作表列數。
+  // 只擴充空白列，不觸及既有資料內容，故不改變現有同步商業邏輯。
+  _ensureRowCapacity_(sh, targetRow, count);
+
   // 中文說明：以第 3 列作為資料區模板，只複製格式不複製值。
   sh.getRange(templateRow, 1, 1, width).copyTo(
     sh.getRange(targetRow, 1, count, width),
     { formatOnly: true }
   );
+}
+
+function _ensureRowCapacity_(sh, targetStartRow, rowCount) {
+  const neededLastRow = Number(targetStartRow || 1) + Number(rowCount || 0) - 1;
+  if (neededLastRow < 1) return;
+
+  const currentMaxRows = sh.getMaxRows();
+  if (neededLastRow > currentMaxRows) {
+    // 中文說明：僅在需要時向下補列，確保後續 copyTo / setValues 範圍不越界。
+    // 此處不刪改既有資料列，只擴充容量，因此不影響 full rewrite / cancel delete / upsert 邏輯。
+    sh.insertRowsAfter(currentMaxRows, neededLastRow - currentMaxRows);
+  }
 }
 
 function _alignRowToColumns_(obj, columns) {
