@@ -1360,5 +1360,11 @@
     "roomType": "1",
     "phone": "0911175788",
     "updatedAt": "2026-04-12"
+  },
+  "OBE01480581626041201": {
+    "projectName": "OTA串接專案",
+    "roomType": "M2",
+    "phone": "0958863831",
+    "updatedAt": "2026-04-12"
   }
 }
