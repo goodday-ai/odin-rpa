@@ -89,12 +89,6 @@
     "phone": "0985016674",
     "updatedAt": "2026-04-15"
   },
-  "OBE60130672126012902": {
-    "projectName": "獨享包棟私墅",
-    "roomType": "包棟",
-    "phone": "0968603686",
-    "updatedAt": "2026-04-15"
-  },
   "OBE69990672126013001": {
     "projectName": "官網專屬優惠",
     "roomType": "包棟",
@@ -339,6 +333,12 @@
     "projectName": "官網專屬優惠",
     "roomType": "包棟",
     "phone": "0934281028",
+    "updatedAt": "2026-04-15"
+  },
+  "OBE98670672126041501": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "包棟",
+    "phone": "",
     "updatedAt": "2026-04-15"
   }
 }
