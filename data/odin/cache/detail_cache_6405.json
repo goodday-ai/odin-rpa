@@ -125,12 +125,6 @@
     "phone": "0915166007",
     "updatedAt": "2026-04-20"
   },
-  "OBE25020640526010503": {
-    "projectName": "Booking",
-    "roomType": "2F",
-    "phone": "0937706114",
-    "updatedAt": "2026-04-20"
-  },
   "OBE31020640526010601": {
     "projectName": "Booking",
     "roomType": "3F",
@@ -705,6 +699,12 @@
     "projectName": "OTA售價",
     "roomType": "3F",
     "phone": "0923169985",
+    "updatedAt": "2026-04-20"
+  },
+  "OBE83260640526042002": {
+    "projectName": "限量優惠專案(連住)",
+    "roomType": "4F",
+    "phone": "0905719613",
     "updatedAt": "2026-04-20"
   }
 }
