@@ -886,5 +886,17 @@
     "roomType": "2F",
     "phone": "0981168320",
     "updatedAt": "2026-04-22"
+  },
+  "OBE70340672326042203": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "3F",
+    "phone": "0968635887",
+    "updatedAt": "2026-04-23"
+  },
+  "OBE87070672326042204": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "3F",
+    "phone": "0922877866",
+    "updatedAt": "2026-04-23"
   }
 }
