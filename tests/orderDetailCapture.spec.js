@@ -250,6 +250,69 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return gasUrl;
   }
 
+  // --- GAS 回應診斷：用規則化分類，讓偶發錯誤可快速定位 ---
+  // 為何這樣寫：
+  // 1) 先以 HTTP 狀態碼 + content-type + body 特徵做分層判斷，避免只靠單一字串硬編碼。
+  // 2) 訊息內提供「最可能根因」與「下一步檢查」，降低值班排障時間。
+  function _normalizeSnippet_(text, maxLen = 600) {
+    return String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, maxLen);
+  }
+
+  function _safeUrlInfo_(raw) {
+    const gasUrl = _normalizeUrl_(raw);
+    try {
+      const u = new URL(gasUrl);
+      return {
+        host: u.host,
+        pathnameTail: u.pathname.slice(-48),
+        searchLen: u.search.length
+      };
+    } catch (_) {
+      return {
+        host: "(invalid-url)",
+        pathnameTail: "",
+        searchLen: 0
+      };
+    }
+  }
+
+  function _classifyGasHttpFailure_({ http, contentType, text }) {
+    const ct = String(contentType || "").toLowerCase();
+    const body = String(text || "");
+    const bodyLower = body.toLowerCase();
+    const isHtmlLike =
+      ct.includes("text/html") ||
+      /<!doctype html|<html[\s>]/i.test(body) ||
+      bodyLower.includes("<title>page not found</title>");
+
+    if (http === 404 && isHtmlLike) {
+      return {
+        code: "gas_webapp_not_found",
+        hint: "GAS URL 可解析但目標 deployment 不存在、版本失效，或 URL 指到錯誤資源。"
+      };
+    }
+    if ((http === 401 || http === 403) && isHtmlLike) {
+      return {
+        code: "gas_webapp_permission_denied",
+        hint: "GAS Web App 存在但權限不足（執行身分 / 存取對象）或呼叫端未被允許。"
+      };
+    }
+    if (http >= 500) {
+      return {
+        code: "gas_server_error",
+        hint: "GAS 伺服端執行失敗，請優先查看 Apps Script Executions 與 Stackdriver 記錄。"
+      };
+    }
+
+    return {
+      code: "gas_unknown_http_error",
+      hint: "非 2xx 回應；請檢查 Apps Script 部署、權限、token 與 spreadsheetId。"
+    };
+  }
+
   const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
   const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
   const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
@@ -918,15 +981,24 @@ function stableSig(row) {
 
     const http = resp.status();
     const text = await resp.text().catch(() => "");
+    const headers = resp.headers();
+    const contentType = headers["content-type"] || headers["Content-Type"] || "";
 
     let j = null;
     try { j = JSON.parse(text); } catch (_) {}
 
     if (http < 200 || http >= 300) {
+      const classified = _classifyGasHttpFailure_({ http, contentType, text });
+      const diag = _urlDiag_(gasUrlRaw);
+      const safeUrl = _safeUrlInfo_(gasUrlRaw);
       throw new Error(
-        `GAS sync failed (gas_app_response_error): hotelId=${hotelId} http=${http}\n` +
-        "Tip: 去 Apps Script → Executions 看伺服端錯誤\n" +
-        `Body: ${text.slice(0, 800)}`
+        `GAS sync failed (${classified.code}): hotelId=${hotelId} http=${http}\n` +
+        `Hint: ${classified.hint}\n` +
+        "Next: 1) 確認 ODIN_SHEET_WEBAPP_URL 是目前 Deployment 的 /exec\n" +
+        "      2) Apps Script → Deployments 檢查版本與存取權\n" +
+        "      3) Apps Script → Executions 確認是否有命中紀錄\n" +
+        `Diag: ${JSON.stringify({ contentType, safeUrl, urlRaw: diag })}\n` +
+        `Body: ${_normalizeSnippet_(text)}`
       );
     }
 
