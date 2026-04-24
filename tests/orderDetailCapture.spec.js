@@ -316,6 +316,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
   const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
   const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
+  // ✅ 中文註解：GAS 寫入採「可調逾時 + 可調重試」；預設保守重試 2 次，降低偶發網路抖動造成整輪失敗。
+  const gasTimeoutMsRaw = Number(process.env.ODIN_GAS_TIMEOUT_MS || "30000");
+  const gasTimeoutMs = Number.isFinite(gasTimeoutMsRaw) ? Math.max(5000, Math.min(180000, gasTimeoutMsRaw)) : 30000;
+  const gasRetryMax = clampInt(process.env.ODIN_GAS_RETRY_MAX || "2", 0, 5, 2);
+  const gasRetryBaseMs = clampInt(process.env.ODIN_GAS_RETRY_BASE_MS || "1500", 200, 15000, 1500);
+  const gasRetryMaxMs = clampInt(process.env.ODIN_GAS_RETRY_MAX_MS || "8000", 500, 30000, 8000);
 
   // ✅ 訂單狀態（你截圖「已成立」）：常見對應 order_status=normal
   const orderStatus = String(process.env.ODIN_ORDER_STATUS || "normal").trim();
@@ -442,7 +448,11 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| apiTimeoutMs=",
     apiTimeoutMs,
     "| cancelApiTimeoutMs=",
-    cancelApiTimeoutMs
+    cancelApiTimeoutMs,
+    "| gasTimeoutMs=",
+    gasTimeoutMs,
+    "| gasRetry(max/base/maxMs)=",
+    `${gasRetryMax}/${gasRetryBaseMs}/${gasRetryMaxMs}`
   );
 
   if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewriteByClock) {
@@ -951,6 +961,33 @@ function stableSig(row) {
     try { fs.writeFileSync(p, JSON.stringify(mapObj, null, 2), "utf8"); } catch (_) {}
   }
 
+  // ✅ 中文註解：只在「可恢復」傳輸錯誤進行重試，避免對設定錯誤（URL/token）做無效重打。
+  function shouldRetryGasTransportError(msgLower) {
+    if (!msgLower) return false;
+    return (
+      msgLower.includes("timeout") ||
+      msgLower.includes("econnreset") ||
+      msgLower.includes("socket hang up") ||
+      msgLower.includes("network") ||
+      msgLower.includes("etimedout")
+    );
+  }
+
+  // ✅ 中文註解：重試等待採指數回退 + 隨機抖動，降低多館別同時重打的尖峰。
+  function gasRetryDelayMs(attemptNo) {
+    const exp = Math.max(0, attemptNo - 1);
+    const base = Math.min(gasRetryMaxMs, gasRetryBaseMs * (2 ** exp));
+    const jitter = randomIntInclusive(0, Math.max(200, Math.floor(base * 0.25)));
+    return Math.min(gasRetryMaxMs, base + jitter);
+  }
+
+  async function sleepMs(ms) {
+    const t = Number(ms);
+    const wait = Number.isFinite(t) ? Math.max(0, t) : 0;
+    if (!wait) return;
+    await page.waitForTimeout(wait);
+  }
+
   async function syncToSheetOrThrow(payload, hotelId, hotelName) {
     if (!writeSheet) return;
 
@@ -960,19 +997,42 @@ function stableSig(row) {
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
 
     let resp;
-    try {
-      resp = await page.request.post(gasUrl, {
-        data: payload,
-        headers: { "content-type": "application/json" }
-      });
-    } catch (e) {
+    let lastTransportErr = null;
+    for (let attempt = 1; attempt <= gasRetryMax + 1; attempt++) {
+      try {
+        resp = await page.request.post(gasUrl, {
+          data: payload,
+          timeout: gasTimeoutMs,
+          headers: { "content-type": "application/json" }
+        });
+        lastTransportErr = null;
+        break;
+      } catch (e) {
+        lastTransportErr = e;
+        const msg = String(e && e.message ? e.message : e);
+        const msgLower = msg.toLowerCase();
+        const isLastAttempt = attempt > gasRetryMax;
+        const retriable = shouldRetryGasTransportError(msgLower) && !msgLower.includes("context closed");
+        if (!isLastAttempt && retriable) {
+          const waitMs = gasRetryDelayMs(attempt);
+          console.warn(
+            `⚠️ GAS POST transient error, retrying: hotelId=${hotelId} attempt=${attempt}/${gasRetryMax + 1} waitMs=${waitMs} err=${msg.slice(0, 240)}`
+          );
+          await sleepMs(waitMs);
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (!resp) {
       const diag = _urlDiag_(gasUrlRaw);
-      const msg = String(e && e.message ? e.message : e);
+      const msg = String(lastTransportErr && lastTransportErr.message ? lastTransportErr.message : lastTransportErr);
       const msgLower = msg.toLowerCase();
       const errType = msgLower.includes("context closed") ? "context_closed" :
         msgLower.includes("timeout") ? "timeout" : "network_transport";
       throw new Error(
-        `GAS POST failed (${errType}): hotelId=${hotelId}\n` +
+        `GAS POST failed (${errType}): hotelId=${hotelId} attempts=${gasRetryMax + 1} timeoutMs=${gasTimeoutMs}\n` +
         "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
         `Diag: ${JSON.stringify(diag)}\n` +
         `Err: ${msg}`
