@@ -694,5 +694,17 @@
     "roomType": "201(雙)",
     "phone": "0937961327",
     "updatedAt": "2026-04-24"
+  },
+  "OBE79330717726042402": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "102(四)",
+    "phone": "",
+    "updatedAt": "2026-04-25"
+  },
+  "OBE47660717726042403": {
+    "projectName": "雙人房",
+    "roomType": "101(雙)｜201(雙)",
+    "phone": "0988961481",
+    "updatedAt": "2026-04-25"
   }
 }
