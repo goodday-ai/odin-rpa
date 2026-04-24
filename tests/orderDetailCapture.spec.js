@@ -316,11 +316,10 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const gasUrlRaw = String(process.env.ODIN_SHEET_WEBAPP_URL || "");
   const sheetToken = String(process.env.ODIN_SHEET_TOKEN || "").trim();
   const spreadsheetId = String(process.env.ODIN_SPREADSHEET_ID || "").trim();
-  // ✅ 中文註解：GAS 寫入採「可調逾時 + 可調重試」；預設保守重試 2 次，降低偶發網路抖動造成整輪失敗。
-  const gasTimeoutMsRaw = Number(process.env.ODIN_GAS_TIMEOUT_MS || "30000");
-  const gasTimeoutMs = Number.isFinite(gasTimeoutMsRaw) ? Math.max(5000, Math.min(180000, gasTimeoutMsRaw)) : 30000;
+  // ✅ 中文註解：GAS 寫入採「可調逾時 + 可調重試」；未設 env 時使用較穩定預設值（60s + 重試 2 次）。
+  const gasTimeoutMs = clampInt(process.env.ODIN_GAS_TIMEOUT_MS || "60000", 10000, 180000, 60000);
   const gasRetryMax = clampInt(process.env.ODIN_GAS_RETRY_MAX || "2", 0, 5, 2);
-  const gasRetryBaseMs = clampInt(process.env.ODIN_GAS_RETRY_BASE_MS || "1500", 200, 15000, 1500);
+  const gasRetryBaseMs = clampInt(process.env.ODIN_GAS_RETRY_BASE_MS || "1000", 200, 15000, 1000);
   const gasRetryMaxMs = clampInt(process.env.ODIN_GAS_RETRY_MAX_MS || "8000", 500, 30000, 8000);
 
   // ✅ 訂單狀態（你截圖「已成立」）：常見對應 order_status=normal
@@ -451,8 +450,12 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     cancelApiTimeoutMs,
     "| gasTimeoutMs=",
     gasTimeoutMs,
-    "| gasRetry(max/base/maxMs)=",
-    `${gasRetryMax}/${gasRetryBaseMs}/${gasRetryMaxMs}`
+    "| gasRetryMax=",
+    gasRetryMax,
+    "| gasRetryBaseMs=",
+    gasRetryBaseMs,
+    "| gasRetryMaxMs=",
+    gasRetryMaxMs
   );
 
   if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewriteByClock) {
