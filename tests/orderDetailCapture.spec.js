@@ -976,6 +976,39 @@ function stableSig(row) {
     );
   }
 
+  // ✅ 中文註解：統一判斷 GAS 傳輸層錯誤型別，讓每次失敗都可直接在 Actions log 定位根因。
+  function classifyGasTransportErrType(msgLower) {
+    const msg = String(msgLower || "");
+    if (msg.includes("context closed")) return "context_closed";
+    if (msg.includes("timeout")) return "timeout";
+    if (msg.includes("socket hang up") || msg.includes("econnreset")) return "socket";
+    if (msg.includes("network") || msg.includes("etimedout")) return "network";
+    return "unknown_transport";
+  }
+
+  // ✅ 中文註解：補齊「應用層」錯誤分類，讓 failed attempt 能區分 non_2xx / invalid_json / app_response。
+  function classifyGasPostErrType(msgLower) {
+    const msg = String(msgLower || "");
+    if (msg.includes("non_2xx")) return "non_2xx";
+    if (msg.includes("invalid_json")) return "invalid_json";
+    if (msg.includes("gas_app_response_error")) return "gas_app_response_error";
+    if (msg.includes("gas_item_response_error")) return "gas_item_response_error";
+    return classifyGasTransportErrType(msg);
+  }
+
+  function previewText(text, maxLen = 500) {
+    const s = _normalizeSnippet_(text, maxLen);
+    return s.length > maxLen ? `${s.slice(0, maxLen)}…` : s;
+  }
+
+  // ✅ 中文註解：從 payload 安全推導 rows 與 bytes，僅用於診斷，避免輸出完整資料內容。
+  function getSheetPayloadDiag(payload) {
+    const raw = JSON.stringify(payload || {});
+    const bytes = Buffer.byteLength(raw, "utf8");
+    const rows = Array.isArray(payload && payload.rows) ? payload.rows.length : 0;
+    return { rows, bytes };
+  }
+
   // ✅ 中文註解：重試等待採指數回退 + 隨機抖動，降低多館別同時重打的尖峰。
   function gasRetryDelayMs(attemptNo) {
     const exp = Math.max(0, attemptNo - 1);
@@ -992,34 +1025,106 @@ function stableSig(row) {
   }
 
   async function syncToSheetOrThrow(payload, hotelId, hotelName) {
-    if (!writeSheet) return;
+    if (!writeSheet) return { durationMs: 0, attempts: 0, status: 0, rows: 0, bytes: 0 };
 
     if (!sheetToken) throw new Error("Missing ODIN_SHEET_TOKEN (GitHub Secrets)");
     if (!spreadsheetId) throw new Error("Missing ODIN_SPREADSHEET_ID (GitHub Secrets)");
 
     const gasUrl = _assertValidGasUrl_(gasUrlRaw);
+    const totalAttempts = gasRetryMax + 1;
+    const payloadDiag = getSheetPayloadDiag(payload);
 
-    let resp;
     let lastTransportErr = null;
-    for (let attempt = 1; attempt <= gasRetryMax + 1; attempt++) {
+    let lastDurationMs = 0;
+    let lastErrType = "";
+
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      const startedAt = Date.now();
+      console.log(
+        `🧾 GAS POST start: hotelId=${hotelId} hotelName=${hotelName || "(empty)"} rows=${payloadDiag.rows} bytes=${payloadDiag.bytes} attempt=${attempt}/${totalAttempts} timeoutMs=${gasTimeoutMs}`
+      );
+
       try {
-        resp = await page.request.post(gasUrl, {
+        const resp = await page.request.post(gasUrl, {
           data: payload,
           timeout: gasTimeoutMs,
           headers: { "content-type": "application/json" }
         });
-        lastTransportErr = null;
-        break;
+
+        lastDurationMs = Date.now() - startedAt;
+
+        const http = resp.status();
+        const text = await resp.text().catch(() => "");
+        const headers = resp.headers();
+        const contentType = headers["content-type"] || headers["Content-Type"] || "";
+        const responsePreview = previewText(text, 500);
+
+        if (http < 200 || http >= 300) {
+          const classified = _classifyGasHttpFailure_({ http, contentType, text });
+          const diag = _urlDiag_(gasUrlRaw);
+          const safeUrl = _safeUrlInfo_(gasUrlRaw);
+          throw new Error(
+            `GAS sync failed (non_2xx/${classified.code}): hotelId=${hotelId} http=${http} durationMs=${lastDurationMs}\n` +
+            `Hint: ${classified.hint}\n` +
+            "Next: 1) 確認 ODIN_SHEET_WEBAPP_URL 是目前 Deployment 的 /exec\n" +
+            "      2) Apps Script → Deployments 檢查版本與存取權\n" +
+            "      3) Apps Script → Executions 確認是否有命中紀錄\n" +
+            `Diag: ${JSON.stringify({ contentType, safeUrl, urlRaw: diag })}\n` +
+            `BodyPreview: ${responsePreview}`
+          );
+        }
+
+        let j = null;
+        try {
+          j = JSON.parse(text);
+        } catch (_) {
+          throw new Error(
+            `GAS sync failed (invalid_json): hotelId=${hotelId} http=${http} durationMs=${lastDurationMs} contentType=${contentType} responsePreview=${JSON.stringify(responsePreview)}`
+          );
+        }
+
+        // ✅ 中文註解：兼容 GAS 回傳 {ok:true,results:[...]} 的多筆格式；若對應館別子項失敗也視為失敗。
+        if (Array.isArray(j && j.results) && j.results.length) {
+          const targetResult = j.results.find((x) => String(x && x.hotelId || "") === String(hotelId || ""));
+          const badResult = targetResult || j.results.find((x) => x && x.ok === false);
+          if (badResult && badResult.ok === false) {
+            throw new Error(
+              `GAS sync failed (gas_item_response_error): hotelId=${hotelId} http=${http} durationMs=${lastDurationMs} ` +
+              `itemErrorType=${String(badResult.errorType || "")} itemStage=${String(badResult.stage || "")} responsePreview=${JSON.stringify(responsePreview)}`
+            );
+          }
+        }
+
+        if (!j || j.ok !== true) {
+          throw new Error(
+            `GAS sync not ok (gas_app_response_error): hotelId=${hotelId} http=${http} durationMs=${lastDurationMs} ` +
+            `errorType=${String(j && j.errorType || "")} stage=${String(j && j.stage || "")} responsePreview=${JSON.stringify(responsePreview)}`
+          );
+        }
+
+        console.log(
+          `✅ GAS POST ok: hotelId=${hotelId} attempt=${attempt}/${totalAttempts} durationMs=${lastDurationMs} status=${http} responsePreview=${JSON.stringify(responsePreview)}`
+        );
+
+        return { durationMs: lastDurationMs, attempts: attempt, status: http, rows: payloadDiag.rows, bytes: payloadDiag.bytes };
       } catch (e) {
         lastTransportErr = e;
+        lastDurationMs = Date.now() - startedAt;
         const msg = String(e && e.message ? e.message : e);
         const msgLower = msg.toLowerCase();
-        const isLastAttempt = attempt > gasRetryMax;
-        const retriable = shouldRetryGasTransportError(msgLower) && !msgLower.includes("context closed");
+        const errType = classifyGasPostErrType(msgLower);
+        lastErrType = errType;
+
+        console.warn(
+          `⚠️ GAS POST failed attempt: hotelId=${hotelId} attempt=${attempt}/${totalAttempts} durationMs=${lastDurationMs} errType=${errType} timeoutMs=${gasTimeoutMs}`
+        );
+
+        const isLastAttempt = attempt >= totalAttempts;
+        const retriable = shouldRetryGasTransportError(msgLower) && classifyGasTransportErrType(msgLower) !== "context_closed";
         if (!isLastAttempt && retriable) {
           const waitMs = gasRetryDelayMs(attempt);
           console.warn(
-            `⚠️ GAS POST transient error, retrying: hotelId=${hotelId} attempt=${attempt}/${gasRetryMax + 1} waitMs=${waitMs} err=${msg.slice(0, 240)}`
+            `⚠️ GAS POST transient error, retrying: hotelId=${hotelId} attempt=${attempt}/${totalAttempts} waitMs=${waitMs} err=${msg.slice(0, 240)}`
           );
           await sleepMs(waitMs);
           continue;
@@ -1028,52 +1133,15 @@ function stableSig(row) {
       }
     }
 
-    if (!resp) {
-      const diag = _urlDiag_(gasUrlRaw);
-      const msg = String(lastTransportErr && lastTransportErr.message ? lastTransportErr.message : lastTransportErr);
-      const msgLower = msg.toLowerCase();
-      const errType = msgLower.includes("context closed") ? "context_closed" :
-        msgLower.includes("timeout") ? "timeout" : "network_transport";
-      throw new Error(
-        `GAS POST failed (${errType}): hotelId=${hotelId} attempts=${gasRetryMax + 1} timeoutMs=${gasTimeoutMs}\n` +
-        "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
-        `Diag: ${JSON.stringify(diag)}\n` +
-        `Err: ${msg}`
-      );
-    }
-
-    const http = resp.status();
-    const text = await resp.text().catch(() => "");
-    const headers = resp.headers();
-    const contentType = headers["content-type"] || headers["Content-Type"] || "";
-
-    let j = null;
-    try { j = JSON.parse(text); } catch (_) {}
-
-    if (http < 200 || http >= 300) {
-      const classified = _classifyGasHttpFailure_({ http, contentType, text });
-      const diag = _urlDiag_(gasUrlRaw);
-      const safeUrl = _safeUrlInfo_(gasUrlRaw);
-      throw new Error(
-        `GAS sync failed (${classified.code}): hotelId=${hotelId} http=${http}\n` +
-        `Hint: ${classified.hint}\n` +
-        "Next: 1) 確認 ODIN_SHEET_WEBAPP_URL 是目前 Deployment 的 /exec\n" +
-        "      2) Apps Script → Deployments 檢查版本與存取權\n" +
-        "      3) Apps Script → Executions 確認是否有命中紀錄\n" +
-        `Diag: ${JSON.stringify({ contentType, safeUrl, urlRaw: diag })}\n` +
-        `Body: ${_normalizeSnippet_(text)}`
-      );
-    }
-
-    if (!j || j.ok !== true) {
-      throw new Error(
-        `GAS sync not ok (gas_app_response_error): hotelId=${hotelId} http=${http}\n` +
-        `Body: ${text.slice(0, 800)}`
-      );
-    }
-
-    console.log("📦 GAS resp:", text.slice(0, 1200));
-    console.log("✅ sheet synced:", hotelId, hotelName ? `(${hotelName})` : "");
+    const diag = _urlDiag_(gasUrlRaw);
+    const msg = String(lastTransportErr && lastTransportErr.message ? lastTransportErr.message : lastTransportErr);
+    const errType = lastErrType || classifyGasPostErrType(String(msg || "").toLowerCase()) || "network_transport";
+    throw new Error(
+      `GAS POST failed (${errType}): hotelId=${hotelId} attempts=${totalAttempts} timeoutMs=${gasTimeoutMs} lastDurationMs=${lastDurationMs} rows=${payloadDiag.rows} bytes=${payloadDiag.bytes}\n` +
+      "Fix: ODIN_SHEET_WEBAPP_URL 可能含空白/換行/引號，或不是 /exec。\n" +
+      `Diag: ${JSON.stringify(diag)}\n` +
+      `Err: ${msg}`
+    );
   }
 
   function buildRangeStr() {
@@ -1456,23 +1524,24 @@ function stableSig(row) {
       writeSnapshotSafe(snapshotPath, next);
     }
 
-    const gasStartedAt = Date.now();
-    await syncToSheetOrThrow(
-      {
-        token: sheetToken,
-        spreadsheetId,
-        hotelId,
-        hotelName,
-        columns,
-        rows: rowsToSync,
-        cancelledOrderNos: uniqueCancelled,
-        replaceAllRows: hotelScheduledFullRewrite,
-        rangeStr
-      },
+    const sheetPayload = {
+      token: sheetToken,
+      spreadsheetId,
       hotelId,
-      hotelName
-    );
+      hotelName,
+      columns,
+      rows: rowsToSync,
+      cancelledOrderNos: uniqueCancelled,
+      replaceAllRows: hotelScheduledFullRewrite,
+      rangeStr
+    };
+    const payloadDiag = getSheetPayloadDiag(sheetPayload);
+    console.log("🧾 hotel sync plan:", hotelId, `sheetRows=${payloadDiag.rows}`, `sheetPayloadBytes=${payloadDiag.bytes}`);
+
+    const gasStartedAt = Date.now();
+    const gasSyncDiag = await syncToSheetOrThrow(sheetPayload, hotelId, hotelName);
     timer.gasSyncMs += Date.now() - gasStartedAt;
+    console.log("🧾 hotel gas result:", hotelId, `gasPostDurationMs=${gasSyncDiag.durationMs}`, `gasPostAttempts=${gasSyncDiag.attempts}`);
 
     console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", hotelScheduledFullRewrite ? "FULL_REWRITE" : (hotelChangedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
 

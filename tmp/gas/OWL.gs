@@ -26,16 +26,16 @@
  */
 
 function doPost(e) {
+  const reqStartedAt = Date.now();
+  const reqId = Utilities.getUuid();
   try {
-    const reqId = Utilities.getUuid();
-
     const token = _getToken_(e);
     const expected = String(PropertiesService.getScriptProperties().getProperty("ODIN_SHEET_TOKEN") || "").trim();
-    if (!expected) return _json_(401, { ok: false, reqId: reqId, error: "ODIN_SHEET_TOKEN not set in Script Properties" });
-    if (!token || token !== expected) return _json_(403, { ok: false, reqId: reqId, error: "Unauthorized" });
+    if (!expected) return _json_(401, { ok: false, reqId: reqId, errorType: "config_error", error: "ODIN_SHEET_TOKEN not set in Script Properties", durationMs: Date.now() - reqStartedAt, stage: "auth" });
+    if (!token || token !== expected) return _json_(403, { ok: false, reqId: reqId, errorType: "unauthorized", error: "Unauthorized", durationMs: Date.now() - reqStartedAt, stage: "auth" });
 
     const bodyText = (e && e.postData && e.postData.contents) ? e.postData.contents : "";
-    if (!bodyText) return _json_(400, { ok: false, reqId: reqId, error: "Empty body" });
+    if (!bodyText) return _json_(400, { ok: false, reqId: reqId, errorType: "empty_body", error: "Empty body", durationMs: Date.now() - reqStartedAt, stage: "parse_body" });
 
     const payload = JSON.parse(bodyText);
     const items = Array.isArray(payload.items) ? payload.items : [payload];
@@ -50,7 +50,10 @@ function doPost(e) {
       return _json_(400, {
         ok: false,
         reqId: reqId,
-        error: "Missing spreadsheetId (payload.spreadsheetId or Script Properties ODIN_SPREADSHEET_ID)"
+        errorType: "missing_spreadsheet_id",
+        error: "Missing spreadsheetId (payload.spreadsheetId or Script Properties ODIN_SPREADSHEET_ID)",
+        durationMs: Date.now() - reqStartedAt,
+        stage: "resolve_spreadsheet_id"
       });
     }
 
@@ -58,16 +61,24 @@ function doPost(e) {
 
     const results = [];
     for (const it of items) {
-      results.push(_syncOne_(ss, it));
+      results.push(_syncOne_(ss, it, reqStartedAt));
     }
 
-    return _json_(200, { ok: true, reqId: reqId, results: results });
+    return _json_(200, { ok: true, reqId: reqId, results: results, durationMs: Date.now() - reqStartedAt, writeMode: "batchSetValues" });
   } catch (err) {
-    return _json_(500, { ok: false, error: String(err && err.stack ? err.stack : err) });
+    return _json_(500, {
+      ok: false,
+      reqId: reqId,
+      errorType: "sheet_write_timeout_or_error",
+      error: String(err && err.stack ? err.stack : err),
+      durationMs: Date.now() - reqStartedAt,
+      stage: "doPost"
+    });
   }
 }
 
-function _syncOne_(ss, item) {
+function _syncOne_(ss, item, reqStartedAt) {
+  const syncStartedAt = Date.now();
   const hotelId = String(item && item.hotelId != null ? item.hotelId : "").trim();
   const hotelName = String(item && item.hotelName != null ? item.hotelName : "").trim();
   const columns = _normalizeColumns_(Array.isArray(item && item.columns) ? item.columns : []);
@@ -75,8 +86,8 @@ function _syncOne_(ss, item) {
   const cancelledOrderNos = Array.isArray(item && item.cancelledOrderNos) ? item.cancelledOrderNos : [];
   const replaceAllRows = !!(item && item.replaceAllRows);
 
-  if (!hotelId) return { ok: false, hotelId: hotelId, error: "Missing hotelId" };
-  if (!columns.length) return { ok: false, hotelId: hotelId, error: "Missing columns" };
+  if (!hotelId) return { ok: false, hotelId: hotelId, errorType: "validation_error", error: "Missing hotelId", durationMs: Date.now() - syncStartedAt, stage: "validate_item" };
+  if (!columns.length) return { ok: false, hotelId: hotelId, errorType: "validation_error", error: "Missing columns", durationMs: Date.now() - syncStartedAt, stage: "validate_item" };
 
   const groups = _groupByYear_(rows);
   const hasCancel = cancelledOrderNos && cancelledOrderNos.length > 0;
@@ -96,6 +107,9 @@ function _syncOne_(ss, item) {
     ok: true,
     hotelId: hotelId,
     hotelName: hotelName,
+    rows: rows.length,
+    writeMode: "batchSetValues",
+    durationMs: 0,
     years: yearsToProcess,
     wrote: []
   };
@@ -136,6 +150,8 @@ function _syncOne_(ss, item) {
     });
   }
 
+  summary.durationMs = Date.now() - syncStartedAt;
+  summary.totalDurationMs = Date.now() - Number(reqStartedAt || syncStartedAt);
   return summary;
 }
 
