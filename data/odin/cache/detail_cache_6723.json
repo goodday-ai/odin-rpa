@@ -910,5 +910,23 @@
     "roomType": "4F",
     "phone": "0918000127",
     "updatedAt": "2026-04-26"
+  },
+  "OBE55440672326042602": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "4F",
+    "phone": "0989517033",
+    "updatedAt": "2026-04-27"
+  },
+  "OBE28400672326042601": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "5F",
+    "phone": "0911791900",
+    "updatedAt": "2026-04-27"
+  },
+  "OBE06330672326042603": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "4F",
+    "phone": "0967007266",
+    "updatedAt": "2026-04-27"
   }
 }
