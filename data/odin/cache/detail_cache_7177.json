@@ -754,5 +754,17 @@
     "roomType": "101(雙)",
     "phone": "0932044228",
     "updatedAt": "2026-04-27"
+  },
+  "OBE85860717726042701": {
+    "projectName": "雙人房",
+    "roomType": "203(雙)",
+    "phone": "0933628920",
+    "updatedAt": "2026-04-28"
+  },
+  "OBE56130717726042702": {
+    "projectName": "雙人房",
+    "roomType": "201(雙)",
+    "phone": "",
+    "updatedAt": "2026-04-28"
   }
 }
