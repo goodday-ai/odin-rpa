@@ -310,5 +310,23 @@
     "roomType": "弎居胡同",
     "phone": "0952157065",
     "updatedAt": "2026-04-26"
+  },
+  "OBE46240632326042801": {
+    "projectName": "官網專屬優惠",
+    "roomType": "弎居胡同",
+    "phone": "0929730716",
+    "updatedAt": "2026-04-29"
+  },
+  "OBE51860632326042803": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "弎居胡同",
+    "phone": "0973773108",
+    "updatedAt": "2026-04-29"
+  },
+  "OBE27810632326042802": {
+    "projectName": "官網專屬優惠",
+    "roomType": "弎居胡同",
+    "phone": "0908597861",
+    "updatedAt": "2026-04-29"
   }
 }
