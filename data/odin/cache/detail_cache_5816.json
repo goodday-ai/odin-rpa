@@ -1570,5 +1570,17 @@
     "roomType": "M2｜Z2",
     "phone": "0963521940",
     "updatedAt": "2026-04-29"
+  },
+  "OBE84830581626043001": {
+    "projectName": "OTA串接專案",
+    "roomType": "M2",
+    "phone": "0963288960",
+    "updatedAt": "2026-04-30"
+  },
+  "OBE72620581626043002": {
+    "projectName": "OTA串接專案",
+    "roomType": "Z2",
+    "phone": "0963288960",
+    "updatedAt": "2026-04-30"
   }
 }
