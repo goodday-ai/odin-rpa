@@ -71,6 +71,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (v > max) return max;
     return v;
   }
+  // ✅ 中文註解：解析可停用的非負整數環境變數；空字串回傳 -1 代表顯式停用。
+  function parseOptionalNonNegativeIntEnv_(name, defaultValue) {
+    const raw = process.env[name];
+    if (raw === undefined) return defaultValue;
+    const text = String(raw).trim();
+    if (text === "") return -1;
+    const n = Number(text);
+    if (!Number.isFinite(n)) return defaultValue;
+    return Math.max(0, Math.floor(n));
+  }
   // ✅ 中文註解：在節流與重試等策略上加入小抖動，降低固定節奏特徵。
   function randomIntInclusive(min, max) {
     const a = Math.trunc(Number(min));
@@ -146,19 +156,21 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // ✅ Detail Cache：是否強制刷新（預設不刷新，只打新訂單）
   // - ODIN_DETAIL_FORCE_REFRESH=1：不管有沒有快取都重打（一般不用）
   const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
+  const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 7);
 
   // ✅ 每日定時 full detail refresh（台北時區）
   // - 預設 6 點；設空字串可停用
   // - 命中該小時時，等效 ODIN_DETAIL_FORCE_REFRESH=1
-  const refreshHourRaw = String(process.env.ODIN_DETAIL_REFRESH_HOUR || "6").trim();
+  const refreshHourEnv = process.env.ODIN_DETAIL_REFRESH_HOUR;
+  const refreshHourRaw = refreshHourEnv === undefined ? "6" : String(refreshHourEnv).trim();
   const refreshHour = refreshHourRaw === "" ? -1 : clampInt(refreshHourRaw, 0, 23, 6);
   const nowTaipeiHour = taipeiNowHour();
   const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
-  const detailForceRefreshEffective = detailForceRefresh || isScheduledDetailRefreshWindow;
+  const detailForceRefreshEffective = detailForceRefresh;
 
   // ✅ 每日 6 點（或 refreshHour）可切到「全量覆寫模式」：不做 changedOnly、不掃 cancel，直接全量覆寫 Sheet
   // ⚠️ 安全閥：若不是 ODIN_YEAR 年度模式，預設不允許全量覆寫，避免只抓到「區間資料」卻把整年歷史刪掉。
-  const fullRewriteEnabled = String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "1") === "1";
+  const fullRewriteEnabled = String(process.env.ODIN_SCHEDULED_FULL_REWRITE || "0") === "1";
   const allowPartialRangeFullRewrite = String(process.env.ODIN_ALLOW_PARTIAL_FULL_REWRITE || "0") === "1";
   const scheduledFullRewriteByClock =
     isScheduledDetailRefreshWindow &&
@@ -420,6 +432,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     `${String(process.env.ODIN_CANCEL_SCAN || "") || "(empty)"}/${String(cancelScanBase)}`,
     "| detailForceRefresh(raw/resolved)=",
     `${String(process.env.ODIN_DETAIL_FORCE_REFRESH || "") || "(empty)"}/${String(detailForceRefreshEffective)}`,
+    "| detailRefreshNearCheckinDays=",
+    detailRefreshNearCheckinDays >= 0 ? detailRefreshNearCheckinDays : "disabled",
     "| modeReason=",
     scheduledFullRewriteByClock ? "scheduled_full_rewrite_window" : "normal_mode",
     "| taipeiHour=",
@@ -437,7 +451,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| fullRewriteMaxDrop=",
     fullRewriteMaxDrop,
     "| detailCache=",
-    fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(newOnly)") : "OFF",
+    fetchDetail ? (detailForceRefreshEffective ? "ON(forceRefresh)" : "ON(nearCheckin+newOnly)") : "OFF",
     "| detailThrottleRangeMs=",
     `${refreshDetailThrottleMinMs}-${refreshDetailThrottleMaxMs}`,
     "| hotelThrottleRangeMs=",
@@ -851,6 +865,31 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (!isValid(d)) return null;
     return d;
   }
+  // ✅ 中文註解：將任意時間轉成台北日期（yyyy-mm-dd 對應的本地日期），避免 UTC 跨日誤差。
+  function toTaipeiDateOnly_(dateLike) {
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    if (!isValid(d)) return null;
+    return parseYmdSafe(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(d)
+    );
+  }
+
+  // ✅ 中文註解：判斷入住日是否落在「今天前後 N 天」內，供局部 detail refresh 使用。
+  function isNearCheckinDate_(checkinValue, days, now = new Date()) {
+    if (!Number.isFinite(days) || days < 0) return false;
+    const checkin = parseYmdSafe(checkinValue);
+    const today = toTaipeiDateOnly_(now);
+    if (!checkin || !today) return false;
+    const utcCheckin = Date.UTC(checkin.getFullYear(), checkin.getMonth(), checkin.getDate());
+    const utcToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const diffDays = Math.floor((utcCheckin - utcToday) / 86400000);
+    return Math.abs(diffDays) <= days;
+  }
 
   function diffDaysFromTodayTaipei(ymd) {
     const target = parseYmdSafe(ymd);
@@ -1178,6 +1217,12 @@ function stableSig(row) {
     const hotelName = hotelNameById[String(hotelId)] || "";
     const rangeStr = buildRangeStr();
 
+    // ✅ 每輪開始前先清理 changed 輸出，避免非 changedOnly 模式沿用舊檔造成 SSOT 誤判
+    const changedPath = path.join(outDir, `orders_sheet_ready_changed_${hotelId}.json`);
+    try {
+      fs.rmSync(changedPath, { force: true });
+    } catch (_) {}
+
     const rows = [];
     const cancelledOrderNos = [];
     let pageNo = 1;
@@ -1195,6 +1240,7 @@ function stableSig(row) {
     const detailCacheMap = readJsonFileSafe(cachePath, {});
     const detailCacheHit = { count: 0 };
     const detailCacheMiss = { count: 0 };
+    const detailNearCheckinRefresh = { count: 0 };
     const detailCacheWrite = { count: 0 };
 
     // -----------------------------
@@ -1269,8 +1315,13 @@ function stableSig(row) {
         for (const order of pageOrders) {
           const cached = detailCacheMap && detailCacheMap[order.key] ? detailCacheMap[order.key] : null;
           const cacheOk = cached && typeof cached === "object";
+          const orderCheckinDate = toSheetDate(pick(order.it, ["sdate", "checkin_date", "checkinDate", "check_in"]));
+          const nearCheckinRefresh =
+            detailRefreshNearCheckinDays >= 0 &&
+            isNearCheckinDate_(orderCheckinDate, detailRefreshNearCheckinDays);
+          const shouldFetchDetail = detailForceRefreshEffective || nearCheckinRefresh || !cacheOk;
 
-          if (cacheOk && !detailForceRefreshEffective) {
+          if (cacheOk && !shouldFetchDetail) {
             detailCacheHit.count++;
             if (cached.projectName) order.projectName = String(cached.projectName);
             if (cached.roomType) order.roomType = String(cached.roomType);
@@ -1278,6 +1329,9 @@ function stableSig(row) {
             continue;
           }
 
+          if (nearCheckinRefresh && cacheOk && !detailForceRefreshEffective) {
+            detailNearCheckinRefresh.count++;
+          }
           detailCacheMiss.count++;
           detailTargets.push(order);
         }
@@ -1449,7 +1503,7 @@ function stableSig(row) {
 
     console.log("✅ wrote:", sheetReadyPath, "rows =", rows.length);
     if (excludeCancelled) console.log("🚫 cancelled skipped:", hotelId, "count =", cancelledSkipped.count);
-    console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "write =", detailCacheWrite.count);
+    console.log("🧾 detailCache:", hotelId, "hit =", detailCacheHit.count, "miss =", detailCacheMiss.count, "nearCheckinRefresh =", detailNearCheckinRefresh.count, "write =", detailCacheWrite.count);
     console.log("🧹 detailCache housekeeping:", hotelId, pruneResult);
     const snapshotPath = snapshotPathFor(hotelId);
     const prevSnapshot = readSnapshotSafe(snapshotPath);
@@ -1504,7 +1558,6 @@ function stableSig(row) {
 
       writeSnapshotSafe(snapshotPath, next);
 
-      const changedPath = `${outDir}/orders_sheet_ready_changed_${hotelId}.json`;
       fs.writeFileSync(
         changedPath,
         JSON.stringify({ hotelId, hotelName, rangeStr, columns, rows: out }, null, 2),
