@@ -826,5 +826,29 @@
     "roomType": "202(四)",
     "phone": "0932248470",
     "updatedAt": "2026-05-01"
+  },
+  "OBE00420717726050201": {
+    "projectName": "同業價格",
+    "roomType": "303(雙)",
+    "phone": "0978776329",
+    "updatedAt": "2026-05-03"
+  },
+  "OBE91120717726050202": {
+    "projectName": "同業價格",
+    "roomType": "203(雙)",
+    "phone": "0978776329",
+    "updatedAt": "2026-05-03"
+  },
+  "OBE18320717726050203": {
+    "projectName": "同業價格",
+    "roomType": "102(四)",
+    "phone": "0978776329",
+    "updatedAt": "2026-05-03"
+  },
+  "OBE68340717726050204": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "102(四)",
+    "phone": "0966224004",
+    "updatedAt": "2026-05-03"
   }
 }
