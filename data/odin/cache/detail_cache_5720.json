@@ -250,5 +250,11 @@
     "roomType": "包棟",
     "phone": "0900000000",
     "updatedAt": "2026-04-30"
+  },
+  "OBE86670572026050401": {
+    "projectName": "Booking",
+    "roomType": "包棟",
+    "phone": "",
+    "updatedAt": "2026-05-05"
   }
 }
