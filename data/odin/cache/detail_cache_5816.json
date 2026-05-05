@@ -1199,12 +1199,6 @@
     "phone": "0931379960",
     "updatedAt": "2026-04-26"
   },
-  "OBE04790581626040808": {
-    "projectName": "OTA串接專案",
-    "roomType": "Z3",
-    "phone": "+652035640799",
-    "updatedAt": "2026-04-26"
-  },
   "OBE21750581626040902": {
     "projectName": "官網訂房專案 - 2人入住",
     "roomType": "M2",
@@ -1618,5 +1612,23 @@
     "roomType": "Z3｜O",
     "phone": "0965816811",
     "updatedAt": "2026-05-05"
+  },
+  "OBE59900581626050502": {
+    "projectName": "OTA串接專案",
+    "roomType": "M5",
+    "phone": "0955079341",
+    "updatedAt": "2026-05-06"
+  },
+  "OBE42500581626050503": {
+    "projectName": "OTA串接專案",
+    "roomType": "1",
+    "phone": "0955236065",
+    "updatedAt": "2026-05-06"
+  },
+  "OBE62180581626050504": {
+    "projectName": "官網訂房專案",
+    "roomType": "Z1",
+    "phone": "0988017466",
+    "updatedAt": "2026-05-06"
   }
 }
