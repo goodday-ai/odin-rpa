@@ -509,12 +509,6 @@
     "phone": "",
     "updatedAt": "2026-04-26"
   },
-  "OBE07320717726041305": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "201(雙)｜203(雙)",
-    "phone": "0968891810",
-    "updatedAt": "2026-04-26"
-  },
   "OBE39380717726041401": {
     "projectName": "同業價格",
     "roomType": "203(雙)",
@@ -843,6 +837,18 @@
     "projectName": "OTA與官網原始價格",
     "roomType": "102(四)",
     "phone": "0981365975",
+    "updatedAt": "2026-05-05"
+  },
+  "OBE33020717726050501": {
+    "projectName": "同業價格",
+    "roomType": "202(四)",
+    "phone": "0900200941",
+    "updatedAt": "2026-05-05"
+  },
+  "OBE26690717726050502": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "205(三)",
+    "phone": "0979209332",
     "updatedAt": "2026-05-05"
   }
 }
