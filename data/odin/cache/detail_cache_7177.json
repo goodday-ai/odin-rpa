@@ -880,5 +880,17 @@
     "roomType": "101(雙)",
     "phone": "0939030652",
     "updatedAt": "2026-05-06"
+  },
+  "OBE01440717726050605": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "202(四)",
+    "phone": "",
+    "updatedAt": "2026-05-07"
+  },
+  "OBE06440717726050606": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "301(雙)",
+    "phone": "",
+    "updatedAt": "2026-05-07"
   }
 }
