@@ -158,15 +158,21 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
   const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 7);
 
-  // ✅ 每日定時 full detail refresh（台北時區）
+  // ✅ 每日定時 detail refresh window（台北時區）
   // - 預設 6 點；設空字串可停用
-  // - 命中該小時時，等效 ODIN_DETAIL_FORCE_REFRESH=1
+  // - 命中該小時時，啟用 scheduled detail refresh window。
+  // - 預設仍採條件式刷新：cache miss / near-checkin / explicit force refresh。
+  // - 不等同 ODIN_DETAIL_FORCE_REFRESH=1，避免全量 detail API 打量過大。
   const refreshHourEnv = process.env.ODIN_DETAIL_REFRESH_HOUR;
   const refreshHourRaw = refreshHourEnv === undefined ? "6" : String(refreshHourEnv).trim();
   const refreshHour = refreshHourRaw === "" ? -1 : clampInt(refreshHourRaw, 0, 23, 6);
   const nowTaipeiHour = taipeiNowHour();
   const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
   const detailForceRefreshEffective = detailForceRefresh;
+  // ✅ 中文註解：統一 detail 抓取條件，避免誤解 06:00 refresh window = 全量 force refresh。
+  function shouldFetchDetailByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
+    return Boolean(detailForceRefreshEffective || nearCheckinRefresh || !cacheOk);
+  }
 
   // ✅ 每日 6 點（或 refreshHour）可切到「全量覆寫模式」：不做 changedOnly、不掃 cancel，直接全量覆寫 Sheet
   // ⚠️ 安全閥：若不是 ODIN_YEAR 年度模式，預設不允許全量覆寫，避免只抓到「區間資料」卻把整年歷史刪掉。
@@ -442,6 +448,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     refreshHour >= 0 ? refreshHour : "disabled",
     "| scheduledRefreshWindow=",
     isScheduledDetailRefreshWindow ? "YES" : "NO",
+    "| scheduledRefreshMode=",
+    "near_checkin_conditional",
     "| scheduledFullRewrite=",
     scheduledFullRewriteByClock ? "YES" : "NO",
     "| allowPartialFullRewrite=",
@@ -471,6 +479,14 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     "| gasRetryMaxMs=",
     gasRetryMaxMs
   );
+  console.log("🧾 detail refresh policy:", {
+    detailRefreshHour: refreshHour >= 0 ? refreshHour : null,
+    isScheduledDetailRefreshWindow,
+    detailForceRefresh,
+    detailForceRefreshEffective,
+    detailRefreshNearCheckinDays: detailRefreshNearCheckinDays >= 0 ? detailRefreshNearCheckinDays : null,
+    scheduledRefreshMode: "near_checkin_conditional"
+  });
 
   if (isScheduledDetailRefreshWindow && fullRewriteEnabled && !scheduledFullRewriteByClock) {
     console.log(
@@ -989,6 +1005,14 @@ function stableSig(row) {
   return parts.map((x) => String(x || "")).join("|");
 }
 
+// ✅ 中文註解：比對前後 row 是否為「房型」異動，提供 changedOnly 判斷時的低噪音可追蹤診斷。
+function detectRoomTypeChange(oldRow, newRow) {
+  const oldRoomType = String((oldRow && oldRow["房型"]) || "");
+  const newRoomType = String((newRow && newRow["房型"]) || "");
+  if (oldRoomType === newRoomType) return null;
+  return { oldRoomType, newRoomType, column: "房型" };
+}
+
   function readSnapshotSafe(p) {
     try {
       if (!fs.existsSync(p)) return {};
@@ -1001,6 +1025,24 @@ function stableSig(row) {
 
   function writeSnapshotSafe(p, mapObj) {
     try { fs.writeFileSync(p, JSON.stringify(mapObj, null, 2), "utf8"); } catch (_) {}
+  }
+
+  // ✅ 中文註解：讀取上一輪 latest rows，讓 changedOnly 可精準標記「房型」欄位異動。
+  function readRowsByOrderNoFromLatest(hotelId) {
+    try {
+      const latestPath = path.join(ssotLatestDir, `orders_sheet_ready_${hotelId}.json`);
+      if (!fs.existsSync(latestPath)) return {};
+      const j = JSON.parse(fs.readFileSync(latestPath, "utf8"));
+      const map = {};
+      for (const row of Array.isArray(j && j.rows) ? j.rows : []) {
+        const key = stableKey(row);
+        if (!key) continue;
+        map[key] = row;
+      }
+      return map;
+    } catch (_) {
+      return {};
+    }
   }
 
   // ✅ 中文註解：只在「可恢復」傳輸錯誤進行重試，避免對設定錯誤（URL/token）做無效重打。
@@ -1319,7 +1361,11 @@ function stableSig(row) {
           const nearCheckinRefresh =
             detailRefreshNearCheckinDays >= 0 &&
             isNearCheckinDate_(orderCheckinDate, detailRefreshNearCheckinDays);
-          const shouldFetchDetail = detailForceRefreshEffective || nearCheckinRefresh || !cacheOk;
+          const shouldFetchDetail = shouldFetchDetailByPolicy({
+            detailForceRefreshEffective,
+            nearCheckinRefresh,
+            cacheOk
+          });
 
           if (cacheOk && !shouldFetchDetail) {
             detailCacheHit.count++;
@@ -1355,7 +1401,19 @@ function stableSig(row) {
             const extractedPhone = extractPhoneFromDetail(detailRes.json);
 
             if (extractedProject) order.projectName = extractedProject;
-            if (extractedRoomType) order.roomType = extractedRoomType;
+            if (extractedRoomType) {
+              const oldRoomType = String(order.roomType || "");
+              order.roomType = extractedRoomType;
+              if (oldRoomType !== order.roomType) {
+                console.log("[ODIN_DETAIL] roomType refreshed", {
+                  hotelId,
+                  orderSerial: order.key,
+                  oldRoomType,
+                  newRoomType: order.roomType,
+                  reason: detailForceRefreshEffective ? "force_refresh" : "scheduled_refresh"
+                });
+              }
+            }
             if (extractedPhone) order.phone = normalizePhone(extractedPhone);
 
             detailCacheMap[order.key] = {
@@ -1547,13 +1605,26 @@ function stableSig(row) {
       const prev = prevSnapshot;
       const next = {};
       const out = [];
+      const prevRowsByKey = readRowsByOrderNoFromLatest(hotelId);
 
       for (const r of rows) {
         const k = stableKey(r);
         if (!k) continue;
         const sig = stableSig(r);
         next[k] = sig;
-        if (!prev[k] || prev[k] !== sig) out.push(r);
+        if (!prev[k] || prev[k] !== sig) {
+          const roomTypeDiff = detectRoomTypeChange(prevRowsByKey[k], r);
+          if (roomTypeDiff) {
+            console.log("[ODIN_SHEET] roomType changed", {
+              hotelId,
+              orderSerial: k,
+              oldRoomType: roomTypeDiff.oldRoomType,
+              newRoomType: roomTypeDiff.newRoomType,
+              column: roomTypeDiff.column
+            });
+          }
+          out.push(r);
+        }
       }
 
       writeSnapshotSafe(snapshotPath, next);
