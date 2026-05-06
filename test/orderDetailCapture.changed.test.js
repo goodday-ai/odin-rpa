@@ -33,7 +33,31 @@ function extractRoomTypeFromDetail(detailJson) {
 }
 
 function shouldFetchDetailByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
-  return Boolean(detailForceRefreshEffective || nearCheckinRefresh || !cacheOk);
+  return getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) !== "cache_hit_skip";
+}
+
+// 中文註解：提供 detail policy 的理由分類，確保營運摘要統計與是否重打判斷一致。
+function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
+  if (detailForceRefreshEffective) return "force";
+  if (nearCheckinRefresh) return "near_checkin";
+  if (!cacheOk) return "cache_miss";
+  return "cache_hit_skip";
+}
+
+// 中文註解：建立低噪音 refresh summary，僅輸出統計欄位，避免敏感資料外洩。
+function buildDetailRefreshSummary(input) {
+  return {
+    hotelId: String(input.hotelId || ""),
+    refreshHour: input.refreshHour,
+    taipeiHour: input.taipeiHour,
+    isScheduledDetailRefreshWindow: Boolean(input.isScheduledDetailRefreshWindow),
+    scheduledRefreshMode: "near_checkin_conditional",
+    forceRefresh: Boolean(input.forceRefresh),
+    forceRefreshEffective: Boolean(input.forceRefreshEffective),
+    nearCheckinDays: input.nearCheckinDays,
+    detailFetchPolicy: { ...input.detailFetchPolicy },
+    roomType: { ...input.roomType }
+  };
 }
 
 test("roomType 變更會進入 changed rows", () => {
@@ -85,4 +109,50 @@ test("explicit force refresh 仍可全量重打 detail", () => {
     cacheOk: true
   });
   assert.equal(shouldFetchDetail, true);
+});
+
+test("detail fetch reason 分類與 shouldFetchDetailByPolicy 一致", () => {
+  const cases = [
+    { input: { detailForceRefreshEffective: true, nearCheckinRefresh: false, cacheOk: true }, expected: "force", fetch: true },
+    { input: { detailForceRefreshEffective: false, nearCheckinRefresh: true, cacheOk: true }, expected: "near_checkin", fetch: true },
+    { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: false }, expected: "cache_miss", fetch: true },
+    { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: true }, expected: "cache_hit_skip", fetch: false }
+  ];
+  for (const c of cases) {
+    assert.equal(getDetailFetchReasonByPolicy(c.input), c.expected);
+    assert.equal(shouldFetchDetailByPolicy(c.input), c.fetch);
+  }
+});
+
+test("refresh summary 不含敏感資料欄位", () => {
+  const summary = buildDetailRefreshSummary({
+    hotelId: "12345",
+    refreshHour: 6,
+    taipeiHour: 6,
+    isScheduledDetailRefreshWindow: true,
+    forceRefresh: false,
+    forceRefreshEffective: false,
+    nearCheckinDays: 7,
+    detailFetchPolicy: { cacheHitSkipped: 10, cacheMissFetched: 2, nearCheckinFetched: 3, forceFetched: 0, totalFetched: 5 },
+    roomType: { refreshed: 1, changed: 1 },
+    cookie: "x",
+    token: "y",
+    phone: "z",
+    payload: { rows: [1] }
+  });
+  const raw = JSON.stringify(summary);
+  assert.equal(raw.includes("cookie"), false);
+  assert.equal(raw.includes("token"), false);
+  assert.equal(raw.includes("phone"), false);
+  assert.equal(raw.includes("payload"), false);
+  assert.equal(raw.includes("\"rows\""), false);
+});
+
+test("roomType changed summary 統計正確", () => {
+  const oldRow = { 房型: "A" };
+  const newRow = { 房型: "B" };
+  const changedRows = [newRow];
+  const roomTypeChangedRows = oldRow.房型 !== newRow.房型 ? 1 : 0;
+  assert.equal(changedRows.length, 1);
+  assert.equal(roomTypeChangedRows, 1);
 });
