@@ -169,9 +169,16 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const nowTaipeiHour = taipeiNowHour();
   const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
   const detailForceRefreshEffective = detailForceRefresh;
+  // ✅ 中文註解：回傳 detail 抓取原因分類，供營運摘要統計使用，且不改既有策略語意。
+  function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
+    if (detailForceRefreshEffective) return "force";
+    if (nearCheckinRefresh) return "near_checkin";
+    if (!cacheOk) return "cache_miss";
+    return "cache_hit_skip";
+  }
   // ✅ 中文註解：統一 detail 抓取條件，避免誤解 06:00 refresh window = 全量 force refresh。
   function shouldFetchDetailByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
-    return Boolean(detailForceRefreshEffective || nearCheckinRefresh || !cacheOk);
+    return getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) !== "cache_hit_skip";
   }
 
   // ✅ 每日 6 點（或 refreshHour）可切到「全量覆寫模式」：不做 changedOnly、不掃 cancel，直接全量覆寫 Sheet
@@ -1283,6 +1290,10 @@ function detectRoomTypeChange(oldRow, newRow) {
     const detailCacheHit = { count: 0 };
     const detailCacheMiss = { count: 0 };
     const detailNearCheckinRefresh = { count: 0 };
+    const detailForceRefreshCount = { count: 0 };
+    const detailFetchCount = { count: 0 };
+    const roomTypeRefreshed = { count: 0 };
+    const roomTypeChangedRows = { count: 0 };
     const detailCacheWrite = { count: 0 };
 
     // -----------------------------
@@ -1361,24 +1372,27 @@ function detectRoomTypeChange(oldRow, newRow) {
           const nearCheckinRefresh =
             detailRefreshNearCheckinDays >= 0 &&
             isNearCheckinDate_(orderCheckinDate, detailRefreshNearCheckinDays);
+          const fetchReason = getDetailFetchReasonByPolicy({
+            detailForceRefreshEffective,
+            nearCheckinRefresh,
+            cacheOk
+          });
           const shouldFetchDetail = shouldFetchDetailByPolicy({
             detailForceRefreshEffective,
             nearCheckinRefresh,
             cacheOk
           });
 
-          if (cacheOk && !shouldFetchDetail) {
+          if (!shouldFetchDetail) {
             detailCacheHit.count++;
             if (cached.projectName) order.projectName = String(cached.projectName);
             if (cached.roomType) order.roomType = String(cached.roomType);
             if (cached.phone) order.phone = normalizePhone(cached.phone);
             continue;
           }
-
-          if (nearCheckinRefresh && cacheOk && !detailForceRefreshEffective) {
-            detailNearCheckinRefresh.count++;
-          }
-          detailCacheMiss.count++;
+          if (fetchReason === "near_checkin") detailNearCheckinRefresh.count++;
+          if (fetchReason === "force") detailForceRefreshCount.count++;
+          if (fetchReason === "cache_miss") detailCacheMiss.count++;
           detailTargets.push(order);
         }
 
@@ -1387,6 +1401,7 @@ function detectRoomTypeChange(oldRow, newRow) {
           if (delayMs > 0) await sleep(delayMs);
 
           const detailStartedAt = Date.now();
+          detailFetchCount.count++;
           const detailRes = await fetchOrderDetail(hotelId, order.key, baseHeaders);
           timer.detailTotalMs += Date.now() - detailStartedAt;
           const detailAnomaly = detectAnomalyFromResponse(detailRes.url, detailRes.httpStatus, detailRes.json);
@@ -1404,7 +1419,8 @@ function detectRoomTypeChange(oldRow, newRow) {
             if (extractedRoomType) {
               const oldRoomType = String(order.roomType || "");
               order.roomType = extractedRoomType;
-              if (oldRoomType !== order.roomType) {
+              if (oldRoomType && oldRoomType !== order.roomType) {
+                roomTypeRefreshed.count++;
                 console.log("[ODIN_DETAIL] roomType refreshed", {
                   hotelId,
                   orderSerial: order.key,
@@ -1615,6 +1631,7 @@ function detectRoomTypeChange(oldRow, newRow) {
         if (!prev[k] || prev[k] !== sig) {
           const roomTypeDiff = detectRoomTypeChange(prevRowsByKey[k], r);
           if (roomTypeDiff) {
+            roomTypeChangedRows.count++;
             console.log("[ODIN_SHEET] roomType changed", {
               hotelId,
               orderSerial: k,
@@ -1637,6 +1654,13 @@ function detectRoomTypeChange(oldRow, newRow) {
 
       rowsToSync = out;
       console.log("✅ changedOnly=1:", hotelId, "changed rows =", out.length, "snapshot =", snapshotPath);
+      console.log("[ODIN_SHEET] changed summary", {
+        hotelId,
+        changedRows: out.length,
+        roomTypeChangedRows: roomTypeChangedRows.count,
+        outputFile: path.basename(changedPath),
+        willSyncToGas: writeSheet
+      });
     } else {
       // 非 changedOnly（含 full rewrite 與 blocked fallback）仍更新 snapshot，供下輪完整性檢查
       const next = {};
@@ -1665,6 +1689,13 @@ function detectRoomTypeChange(oldRow, newRow) {
     const gasStartedAt = Date.now();
     const gasSyncDiag = await syncToSheetOrThrow(sheetPayload, hotelId, hotelName);
     timer.gasSyncMs += Date.now() - gasStartedAt;
+    console.log("[ODIN_GAS] sync summary", {
+      hotelId,
+      rowsSent: rowsToSync.length,
+      ok: true,
+      failedItems: 0,
+      durationMs: gasSyncDiag.durationMs
+    });
     console.log("🧾 hotel gas result:", hotelId, `gasPostDurationMs=${gasSyncDiag.durationMs}`, `gasPostAttempts=${gasSyncDiag.attempts}`);
 
     console.log("🧾 sync payload:", hotelId, "rows =", rowsToSync.length, "(total rows =", rows.length + ")", "| mode=", hotelScheduledFullRewrite ? "FULL_REWRITE" : (hotelChangedOnlyEffective ? "CHANGED_ONLY" : "UPSERT"));
@@ -1672,6 +1703,27 @@ function detectRoomTypeChange(oldRow, newRow) {
     if (!rows.length) {
       console.log("⚠️ rows=0:", hotelId, hotelName ? `(${hotelName})` : "", "可能區間內沒訂單或被過濾");
     }
+    console.log("[ODIN_DETAIL] refresh summary", {
+      hotelId: String(hotelId),
+      refreshHour,
+      taipeiHour: nowTaipeiHour,
+      isScheduledDetailRefreshWindow,
+      scheduledRefreshMode: "near_checkin_conditional",
+      forceRefresh: detailForceRefresh,
+      forceRefreshEffective: detailForceRefreshEffective,
+      nearCheckinDays: detailRefreshNearCheckinDays,
+      detailFetchPolicy: {
+        cacheHitSkipped: detailCacheHit.count,
+        cacheMissFetched: detailCacheMiss.count,
+        nearCheckinFetched: detailNearCheckinRefresh.count,
+        forceFetched: detailForceRefreshCount.count,
+        totalFetched: detailFetchCount.count
+      },
+      roomType: {
+        refreshed: roomTypeRefreshed.count,
+        changed: roomTypeChangedRows.count
+      }
+    });
     console.log("⏱️ hotel timing:", hotelId, {
       calendar_list_ms: timer.calendarListMs,
       detail_total_ms: timer.detailTotalMs,
