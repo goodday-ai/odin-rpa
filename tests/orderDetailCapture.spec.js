@@ -155,8 +155,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
 
   // ✅ Detail Cache：是否強制刷新（預設不刷新，只打新訂單）
   // - ODIN_DETAIL_FORCE_REFRESH=1：不管有沒有快取都重打（一般不用）
+  // - ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS 未設定時，預設只刷新入住日前後 3 天的 detail
   const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
-  const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 7);
+  const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 3);
 
   // ✅ 每日定時 detail refresh window（台北時區）
   // - 預設 6 點；設空字串可停用
