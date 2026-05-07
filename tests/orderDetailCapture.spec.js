@@ -910,6 +910,37 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (!isValid(d)) return null;
     return d;
   }
+
+  // ✅ 中文註解：ODIN 日期解析器，優先走明確 Y/M/D regex，避免 YYYY/MM/DD 依賴 new Date 造成跨環境/時區誤差。
+  function parseOdinDateYMD_(raw) {
+    if (raw instanceof Date) {
+      if (!isValid(raw)) return { ok: false, ymd: "" };
+      return { ok: true, ymd: format(raw, "yyyy-MM-dd") };
+    }
+
+    const text = String(raw == null ? "" : raw).trim();
+    if (!text) return { ok: false, ymd: "" };
+
+    const ymdMatch = text.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (ymdMatch) {
+      const year = Number(ymdMatch[1]);
+      const month = Number(ymdMatch[2]);
+      const day = Number(ymdMatch[3]);
+      const utcDate = new Date(Date.UTC(year, month - 1, day));
+      if (
+        utcDate.getUTCFullYear() !== year ||
+        utcDate.getUTCMonth() !== month - 1 ||
+        utcDate.getUTCDate() !== day
+      ) {
+        return { ok: false, ymd: "" };
+      }
+      return { ok: true, ymd: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` };
+    }
+
+    const fallback = new Date(text);
+    if (!isValid(fallback)) return { ok: false, ymd: "" };
+    return { ok: true, ymd: format(fallback, "yyyy-MM-dd") };
+  }
   // ✅ 中文註解：將任意時間轉成台北日期（yyyy-mm-dd 對應的本地日期），避免 UTC 跨日誤差。
   function toTaipeiDateOnly_(dateLike) {
     const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
@@ -929,15 +960,17 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     if (!Number.isFinite(days) || days < 0) return false;
     const checkinRaw = String(checkinValue || "").trim();
     const checkoutRaw = String(checkoutValue || "").trim();
-    const checkin = parseYmdSafe(checkinRaw);
-    const checkout = parseYmdSafe(checkoutRaw);
+    const checkinParsed = parseOdinDateYMD_(checkinRaw);
+    const checkoutParsed = parseOdinDateYMD_(checkoutRaw);
+    const checkin = checkinParsed.ok ? parseYmdSafe(checkinParsed.ymd) : null;
+    const checkout = checkoutParsed.ok ? parseYmdSafe(checkoutParsed.ymd) : null;
     const today = toTaipeiDateOnly_(now);
     if (!checkinRaw || !checkoutRaw) {
       return {
         isNearCheckinOrder: false,
         todayTaipei: today ? format(today, "yyyy-MM-dd") : "",
-        parsedCheckinYMD: checkin ? format(checkin, "yyyy-MM-dd") : "",
-        parsedCheckoutYMD: checkout ? format(checkout, "yyyy-MM-dd") : "",
+        parsedCheckinYMD: checkinParsed.ok ? checkinParsed.ymd : "",
+        parsedCheckoutYMD: checkoutParsed.ok ? checkoutParsed.ymd : "",
         diffFromCheckinDays: Number.POSITIVE_INFINITY,
         diffFromCheckoutDays: Number.POSITIVE_INFINITY,
         nearCheckinDecisionError: "MISSING_DATE_FIELDS"
@@ -947,8 +980,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
       return {
         isNearCheckinOrder: false,
         todayTaipei: today ? format(today, "yyyy-MM-dd") : "",
-        parsedCheckinYMD: checkin ? format(checkin, "yyyy-MM-dd") : "",
-        parsedCheckoutYMD: checkout ? format(checkout, "yyyy-MM-dd") : "",
+        parsedCheckinYMD: checkinParsed.ok ? checkinParsed.ymd : "",
+        parsedCheckoutYMD: checkoutParsed.ok ? checkoutParsed.ymd : "",
         diffFromCheckinDays: Number.POSITIVE_INFINITY,
         diffFromCheckoutDays: Number.POSITIVE_INFINITY,
         nearCheckinDecisionError: "DATE_PARSE_FAILED"
@@ -963,8 +996,8 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return {
       isNearCheckinOrder,
       todayTaipei: format(today, "yyyy-MM-dd"),
-      parsedCheckinYMD: format(checkin, "yyyy-MM-dd"),
-      parsedCheckoutYMD: format(checkout, "yyyy-MM-dd"),
+      parsedCheckinYMD: checkinParsed.ymd,
+      parsedCheckoutYMD: checkoutParsed.ymd,
       diffFromCheckinDays,
       diffFromCheckoutDays,
       nearCheckinDecisionError: ""
