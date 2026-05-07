@@ -158,6 +158,9 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // - ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS 未設定時，預設只刷新入住日前後 3 天的 detail
   const detailForceRefresh = String(process.env.ODIN_DETAIL_FORCE_REFRESH || "0") === "1";
   const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 3);
+  // ✅ 中文註解：near-checkin 診斷輸出控制；預設每館前 5 筆，可透過 env 擴增為全量或指定訂單強制輸出。
+  const debugNearCheckinAll = String(process.env.ODIN_DETAIL_DEBUG_NEAR_CHECKIN || "0") === "1";
+  const debugNearCheckinOrder = String(process.env.ODIN_DETAIL_DEBUG_ORDER || "").trim();
 
   // ✅ 每日定時 detail refresh window（台北時區）
   // - 預設 6 點；僅明確 off/disabled/disable/none/-1 才停用
@@ -924,15 +927,31 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   // ✅ 中文註解：用入住/退房雙邊界判斷 near-checkin，避免只看入住而漏掉剛退房訂單。
   function getNearCheckinDecision_(checkinValue, checkoutValue, days, now = new Date()) {
     if (!Number.isFinite(days) || days < 0) return false;
-    const checkin = parseYmdSafe(checkinValue);
-    const checkout = parseYmdSafe(checkoutValue);
+    const checkinRaw = String(checkinValue || "").trim();
+    const checkoutRaw = String(checkoutValue || "").trim();
+    const checkin = parseYmdSafe(checkinRaw);
+    const checkout = parseYmdSafe(checkoutRaw);
     const today = toTaipeiDateOnly_(now);
+    if (!checkinRaw || !checkoutRaw) {
+      return {
+        isNearCheckinOrder: false,
+        todayTaipei: today ? format(today, "yyyy-MM-dd") : "",
+        parsedCheckinYMD: checkin ? format(checkin, "yyyy-MM-dd") : "",
+        parsedCheckoutYMD: checkout ? format(checkout, "yyyy-MM-dd") : "",
+        diffFromCheckinDays: Number.POSITIVE_INFINITY,
+        diffFromCheckoutDays: Number.POSITIVE_INFINITY,
+        nearCheckinDecisionError: "MISSING_DATE_FIELDS"
+      };
+    }
     if (!checkin || !checkout || !today) {
       return {
         isNearCheckinOrder: false,
         todayTaipei: today ? format(today, "yyyy-MM-dd") : "",
+        parsedCheckinYMD: checkin ? format(checkin, "yyyy-MM-dd") : "",
+        parsedCheckoutYMD: checkout ? format(checkout, "yyyy-MM-dd") : "",
         diffFromCheckinDays: Number.POSITIVE_INFINITY,
-        diffFromCheckoutDays: Number.POSITIVE_INFINITY
+        diffFromCheckoutDays: Number.POSITIVE_INFINITY,
+        nearCheckinDecisionError: "DATE_PARSE_FAILED"
       };
     }
     const utcCheckin = Date.UTC(checkin.getFullYear(), checkin.getMonth(), checkin.getDate());
@@ -944,8 +963,11 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return {
       isNearCheckinOrder,
       todayTaipei: format(today, "yyyy-MM-dd"),
+      parsedCheckinYMD: format(checkin, "yyyy-MM-dd"),
+      parsedCheckoutYMD: format(checkout, "yyyy-MM-dd"),
       diffFromCheckinDays,
-      diffFromCheckoutDays
+      diffFromCheckoutDays,
+      nearCheckinDecisionError: ""
     };
   }
 
@@ -1406,6 +1428,7 @@ function detectRoomTypeChange(oldRow, newRow) {
         for (const order of pageOrders) {
           const cached = detailCacheMap && detailCacheMap[order.key] ? detailCacheMap[order.key] : null;
           const cacheOk = cached && typeof cached === "object";
+          // ✅ 中文註解：near-checkin 一律使用 list/sheet-ready row 的入住/退房欄位，避免誤讀 detail API 欄位。
           const orderCheckinDate = toSheetDate(pick(order.it, ["sdate", "checkin_date", "checkinDate", "check_in"]));
           const orderCheckoutDate = toSheetDate(pick(order.it, ["edate", "checkout_date", "checkoutDate", "check_out"]));
           const nearCheckinDecision = getNearCheckinDecision_(orderCheckinDate, orderCheckoutDate, detailRefreshNearCheckinDays);
@@ -1421,6 +1444,26 @@ function detectRoomTypeChange(oldRow, newRow) {
             nearCheckinRefresh,
             cacheOk
           });
+          const isDebugTargetOrder = debugNearCheckinOrder && order.key === debugNearCheckinOrder;
+          if (debugNearCheckinAll || nearCheckinDecisionSamples.length < 5 || isDebugTargetOrder) {
+            nearCheckinDecisionSamples.push({
+              hotelId: String(hotelId),
+              orderSerial: order.key,
+              checkinRaw: orderCheckinDate,
+              checkoutRaw: orderCheckoutDate,
+              parsedCheckinYMD: nearCheckinDecision.parsedCheckinYMD,
+              parsedCheckoutYMD: nearCheckinDecision.parsedCheckoutYMD,
+              todayTaipeiYMD: nearCheckinDecision.todayTaipei,
+              nearCheckinDays: detailRefreshNearCheckinDays,
+              diffFromCheckinDays: nearCheckinDecision.diffFromCheckinDays,
+              diffFromCheckoutDays: nearCheckinDecision.diffFromCheckoutDays,
+              isNearCheckinOrder: nearCheckinDecision.isNearCheckinOrder,
+              cacheHit: Boolean(cacheOk),
+              shouldFetchDetail,
+              fetchReason,
+              nearCheckinDecisionError: nearCheckinDecision.nearCheckinDecisionError || ""
+            });
+          }
 
           if (!shouldFetchDetail) {
             detailCacheHit.count++;
@@ -1435,27 +1478,9 @@ function detectRoomTypeChange(oldRow, newRow) {
           }
           if (fetchReason === "force") detailForceRefreshCount.count++;
           if (fetchReason === "cache_miss") detailCacheMiss.count++;
-          if (nearCheckinDecisionSamples.length < 5) {
-            nearCheckinDecisionSamples.push({
-              hotelId: String(hotelId),
-              orderSerial: order.key,
-              checkinRaw: orderCheckinDate,
-              checkoutRaw: orderCheckoutDate,
-              todayTaipei: nearCheckinDecision.todayTaipei,
-              nearCheckinDays: detailRefreshNearCheckinDays,
-              diffFromCheckinDays: nearCheckinDecision.diffFromCheckinDays,
-              diffFromCheckoutDays: nearCheckinDecision.diffFromCheckoutDays,
-              isNearCheckinOrder: nearCheckinDecision.isNearCheckinOrder,
-              cacheHit: Boolean(cacheOk),
-              shouldFetchDetail,
-              fetchReason
-            });
-          }
           detailTargets.push(order);
         }
-        if (nearCheckinDecisionSamples.length) {
-          console.log("[ODIN_DETAIL] near-checkin decision sample", nearCheckinDecisionSamples);
-        }
+        console.log("[ODIN_DETAIL] near-checkin decision sample", nearCheckinDecisionSamples);
 
         await runWithConcurrency(detailTargets, detailConcurrency, async (order) => {
           const delayMs = randomIntInclusive(refreshDetailThrottleMinMs, refreshDetailThrottleMaxMs);
