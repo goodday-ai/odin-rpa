@@ -160,21 +160,39 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const detailRefreshNearCheckinDays = parseOptionalNonNegativeIntEnv_("ODIN_DETAIL_REFRESH_NEAR_CHECKIN_DAYS", 3);
 
   // ✅ 每日定時 detail refresh window（台北時區）
-  // - 預設 6 點；設空字串可停用
+  // - 預設 6 點；僅明確 off/disabled/disable/none/-1 才停用
   // - 命中該小時時，啟用 scheduled detail refresh window。
   // - 預設仍採條件式刷新：cache miss / near-checkin / explicit force refresh。
   // - 不等同 ODIN_DETAIL_FORCE_REFRESH=1，避免全量 detail API 打量過大。
-  const refreshHourEnv = process.env.ODIN_DETAIL_REFRESH_HOUR;
-  const refreshHourRaw = refreshHourEnv === undefined ? "6" : String(refreshHourEnv).trim();
-  const refreshHour = refreshHourRaw === "" ? -1 : clampInt(refreshHourRaw, 0, 23, 6);
+  // ✅ 中文註解：集中解析 refresh hour，避免 CI 傳入空字串時被誤判為停用。
+  function parseDetailRefreshHour_(raw) {
+    if (raw === undefined || raw === null) {
+      return { hour: 6, source: "default" };
+    }
+    const text = String(raw).trim();
+    if (!text) {
+      return { hour: 6, source: "default_empty_env" };
+    }
+    if (/^(off|disabled|disable|none|-1)$/i.test(text)) {
+      return { hour: -1, source: "explicit_disabled" };
+    }
+    const n = Number(text);
+    if (Number.isFinite(n) && n >= 0 && n <= 23) {
+      return { hour: Math.floor(n), source: "env" };
+    }
+    return { hour: 6, source: "default_invalid_env" };
+  }
+  const refreshHourParsed = parseDetailRefreshHour_(process.env.ODIN_DETAIL_REFRESH_HOUR);
+  const refreshHour = refreshHourParsed.hour;
+  const refreshHourSource = refreshHourParsed.source;
   const nowTaipeiHour = taipeiNowHour();
   const isScheduledDetailRefreshWindow = refreshHour >= 0 && nowTaipeiHour === refreshHour;
   const detailForceRefreshEffective = detailForceRefresh;
   // ✅ 中文註解：回傳 detail 抓取原因分類，供營運摘要統計使用，且不改既有策略語意。
   function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
     if (detailForceRefreshEffective) return "force";
-    if (nearCheckinRefresh) return "near_checkin";
     if (!cacheOk) return "cache_miss";
+    if (nearCheckinRefresh) return "near_checkin_scheduled_refresh";
     return "cache_hit_skip";
   }
   // ✅ 中文註解：統一 detail 抓取條件，避免誤解 06:00 refresh window = 全量 force refresh。
@@ -903,16 +921,32 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     );
   }
 
-  // ✅ 中文註解：判斷入住日是否落在「今天前後 N 天」內，供局部 detail refresh 使用。
-  function isNearCheckinDate_(checkinValue, days, now = new Date()) {
+  // ✅ 中文註解：用入住/退房雙邊界判斷 near-checkin，避免只看入住而漏掉剛退房訂單。
+  function getNearCheckinDecision_(checkinValue, checkoutValue, days, now = new Date()) {
     if (!Number.isFinite(days) || days < 0) return false;
     const checkin = parseYmdSafe(checkinValue);
+    const checkout = parseYmdSafe(checkoutValue);
     const today = toTaipeiDateOnly_(now);
-    if (!checkin || !today) return false;
+    if (!checkin || !checkout || !today) {
+      return {
+        isNearCheckinOrder: false,
+        todayTaipei: today ? format(today, "yyyy-MM-dd") : "",
+        diffFromCheckinDays: Number.POSITIVE_INFINITY,
+        diffFromCheckoutDays: Number.POSITIVE_INFINITY
+      };
+    }
     const utcCheckin = Date.UTC(checkin.getFullYear(), checkin.getMonth(), checkin.getDate());
+    const utcCheckout = Date.UTC(checkout.getFullYear(), checkout.getMonth(), checkout.getDate());
     const utcToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-    const diffDays = Math.floor((utcCheckin - utcToday) / 86400000);
-    return Math.abs(diffDays) <= days;
+    const diffFromCheckinDays = Math.floor((utcToday - utcCheckin) / 86400000);
+    const diffFromCheckoutDays = Math.floor((utcToday - utcCheckout) / 86400000);
+    const isNearCheckinOrder = diffFromCheckinDays >= -days && diffFromCheckoutDays <= days;
+    return {
+      isNearCheckinOrder,
+      todayTaipei: format(today, "yyyy-MM-dd"),
+      diffFromCheckinDays,
+      diffFromCheckoutDays
+    };
   }
 
   function diffDaysFromTodayTaipei(ymd) {
@@ -1290,7 +1324,9 @@ function detectRoomTypeChange(oldRow, newRow) {
     const detailCacheMap = readJsonFileSafe(cachePath, {});
     const detailCacheHit = { count: 0 };
     const detailCacheMiss = { count: 0 };
+    const detailNearCheckinEligible = { count: 0 };
     const detailNearCheckinRefresh = { count: 0 };
+    const detailNearCheckinCacheHitRefetched = { count: 0 };
     const detailForceRefreshCount = { count: 0 };
     const detailFetchCount = { count: 0 };
     const roomTypeRefreshed = { count: 0 };
@@ -1366,13 +1402,15 @@ function detectRoomTypeChange(oldRow, newRow) {
       if (fetchDetail && pageOrders.length) {
         const detailTargets = [];
 
+        const nearCheckinDecisionSamples = [];
         for (const order of pageOrders) {
           const cached = detailCacheMap && detailCacheMap[order.key] ? detailCacheMap[order.key] : null;
           const cacheOk = cached && typeof cached === "object";
           const orderCheckinDate = toSheetDate(pick(order.it, ["sdate", "checkin_date", "checkinDate", "check_in"]));
-          const nearCheckinRefresh =
-            detailRefreshNearCheckinDays >= 0 &&
-            isNearCheckinDate_(orderCheckinDate, detailRefreshNearCheckinDays);
+          const orderCheckoutDate = toSheetDate(pick(order.it, ["edate", "checkout_date", "checkoutDate", "check_out"]));
+          const nearCheckinDecision = getNearCheckinDecision_(orderCheckinDate, orderCheckoutDate, detailRefreshNearCheckinDays);
+          const nearCheckinRefresh = detailRefreshNearCheckinDays >= 0 && nearCheckinDecision.isNearCheckinOrder;
+          if (nearCheckinRefresh) detailNearCheckinEligible.count++;
           const fetchReason = getDetailFetchReasonByPolicy({
             detailForceRefreshEffective,
             nearCheckinRefresh,
@@ -1391,10 +1429,32 @@ function detectRoomTypeChange(oldRow, newRow) {
             if (cached.phone) order.phone = normalizePhone(cached.phone);
             continue;
           }
-          if (fetchReason === "near_checkin") detailNearCheckinRefresh.count++;
+          if (fetchReason === "near_checkin_scheduled_refresh") {
+            detailNearCheckinRefresh.count++;
+            if (cacheOk) detailNearCheckinCacheHitRefetched.count++;
+          }
           if (fetchReason === "force") detailForceRefreshCount.count++;
           if (fetchReason === "cache_miss") detailCacheMiss.count++;
+          if (nearCheckinDecisionSamples.length < 5) {
+            nearCheckinDecisionSamples.push({
+              hotelId: String(hotelId),
+              orderSerial: order.key,
+              checkinRaw: orderCheckinDate,
+              checkoutRaw: orderCheckoutDate,
+              todayTaipei: nearCheckinDecision.todayTaipei,
+              nearCheckinDays: detailRefreshNearCheckinDays,
+              diffFromCheckinDays: nearCheckinDecision.diffFromCheckinDays,
+              diffFromCheckoutDays: nearCheckinDecision.diffFromCheckoutDays,
+              isNearCheckinOrder: nearCheckinDecision.isNearCheckinOrder,
+              cacheHit: Boolean(cacheOk),
+              shouldFetchDetail,
+              fetchReason
+            });
+          }
           detailTargets.push(order);
+        }
+        if (nearCheckinDecisionSamples.length) {
+          console.log("[ODIN_DETAIL] near-checkin decision sample", nearCheckinDecisionSamples);
         }
 
         await runWithConcurrency(detailTargets, detailConcurrency, async (order) => {
@@ -1706,7 +1766,8 @@ function detectRoomTypeChange(oldRow, newRow) {
     }
     console.log("[ODIN_DETAIL] refresh summary", {
       hotelId: String(hotelId),
-      refreshHour,
+      detailRefreshHour: refreshHour >= 0 ? refreshHour : "disabled",
+      detailRefreshHourSource: refreshHourSource,
       taipeiHour: nowTaipeiHour,
       isScheduledDetailRefreshWindow,
       scheduledRefreshMode: "near_checkin_conditional",
@@ -1714,6 +1775,8 @@ function detectRoomTypeChange(oldRow, newRow) {
       forceRefreshEffective: detailForceRefreshEffective,
       nearCheckinDays: detailRefreshNearCheckinDays,
       detailFetchPolicy: {
+        nearCheckinEligible: detailNearCheckinEligible.count,
+        nearCheckinCacheHitRefetched: detailNearCheckinCacheHitRefetched.count,
         cacheHitSkipped: detailCacheHit.count,
         cacheMissFetched: detailCacheMiss.count,
         nearCheckinFetched: detailNearCheckinRefresh.count,
