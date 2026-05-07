@@ -36,11 +36,22 @@ function shouldFetchDetailByPolicy({ detailForceRefreshEffective, nearCheckinRef
   return getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) !== "cache_hit_skip";
 }
 
+// 中文註解：集中解析 ODIN_DETAIL_REFRESH_HOUR，空值回預設 6，僅明確停用字串才停用。
+function parseDetailRefreshHour_(raw) {
+  if (raw === undefined || raw === null) return { hour: 6, source: "default" };
+  const text = String(raw).trim();
+  if (!text) return { hour: 6, source: "default_empty_env" };
+  if (/^(off|disabled|disable|none|-1)$/i.test(text)) return { hour: -1, source: "explicit_disabled" };
+  const n = Number(text);
+  if (Number.isFinite(n) && n >= 0 && n <= 23) return { hour: Math.floor(n), source: "env" };
+  return { hour: 6, source: "default_invalid_env" };
+}
+
 // 中文註解：提供 detail policy 的理由分類，確保營運摘要統計與是否重打判斷一致。
 function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
   if (detailForceRefreshEffective) return "force";
-  if (nearCheckinRefresh) return "near_checkin";
   if (!cacheOk) return "cache_miss";
+  if (nearCheckinRefresh) return "near_checkin_scheduled_refresh";
   return "cache_hit_skip";
 }
 
@@ -114,13 +125,31 @@ test("explicit force refresh 仍可全量重打 detail", () => {
 test("detail fetch reason 分類與 shouldFetchDetailByPolicy 一致", () => {
   const cases = [
     { input: { detailForceRefreshEffective: true, nearCheckinRefresh: false, cacheOk: true }, expected: "force", fetch: true },
-    { input: { detailForceRefreshEffective: false, nearCheckinRefresh: true, cacheOk: true }, expected: "near_checkin", fetch: true },
+    { input: { detailForceRefreshEffective: false, nearCheckinRefresh: true, cacheOk: true }, expected: "near_checkin_scheduled_refresh", fetch: true },
     { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: false }, expected: "cache_miss", fetch: true },
     { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: true }, expected: "cache_hit_skip", fetch: false }
   ];
   for (const c of cases) {
     assert.equal(getDetailFetchReasonByPolicy(c.input), c.expected);
     assert.equal(shouldFetchDetailByPolicy(c.input), c.fetch);
+  }
+});
+
+test("parseDetailRefreshHour_ 解析 fallback 與停用語意", () => {
+  const cases = [
+    { raw: undefined, hour: 6, source: "default" },
+    { raw: "", hour: 6, source: "default_empty_env" },
+    { raw: "   ", hour: 6, source: "default_empty_env" },
+    { raw: "6", hour: 6, source: "env" },
+    { raw: "17", hour: 17, source: "env" },
+    { raw: "23", hour: 23, source: "env" },
+    { raw: "off", hour: -1, source: "explicit_disabled" },
+    { raw: "disabled", hour: -1, source: "explicit_disabled" },
+    { raw: "-1", hour: -1, source: "explicit_disabled" },
+    { raw: "abc", hour: 6, source: "default_invalid_env" }
+  ];
+  for (const c of cases) {
+    assert.deepEqual(parseDetailRefreshHour_(c.raw), { hour: c.hour, source: c.source });
   }
 });
 
