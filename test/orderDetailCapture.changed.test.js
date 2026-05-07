@@ -71,6 +71,43 @@ function buildDetailRefreshSummary(input) {
   };
 }
 
+// 中文註解：ODIN 日期解析（支援 YYYY/MM/DD、YYYY-MM-DD、Date、ISO 與可解析字串），回傳標準 YYYY-MM-DD。
+function parseOdinDateYMD_(raw) {
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return { ok: false, ymd: "" };
+    return { ok: true, ymd: raw.toISOString().slice(0, 10) };
+  }
+  const text = String(raw == null ? "" : raw).trim();
+  if (!text) return { ok: false, ymd: "" };
+  const m = text.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return { ok: false, ymd: "" };
+    return { ok: true, ymd: `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}` };
+  }
+  const fallback = new Date(text);
+  if (Number.isNaN(fallback.getTime())) return { ok: false, ymd: "" };
+  return { ok: true, ymd: fallback.toISOString().slice(0, 10) };
+}
+
+// 中文註解：near-checkin 採 UTC day 差計算，避免時區造成前後一天誤判。
+function getNearCheckinDecision_(checkinValue, checkoutValue, days, todayTaipeiYMD) {
+  const checkin = parseOdinDateYMD_(checkinValue);
+  const checkout = parseOdinDateYMD_(checkoutValue);
+  const today = parseOdinDateYMD_(todayTaipeiYMD);
+  if (!checkin.ok || !checkout.ok || !today.ok) return { isNearCheckinOrder: false };
+  const toUtcDay = (ymd) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const diffFromCheckinDays = Math.floor((toUtcDay(today.ymd) - toUtcDay(checkin.ymd)) / 86400000);
+  const diffFromCheckoutDays = Math.floor((toUtcDay(today.ymd) - toUtcDay(checkout.ymd)) / 86400000);
+  return { isNearCheckinOrder: diffFromCheckinDays >= -days && diffFromCheckoutDays <= days };
+}
+
 test("roomType 變更會進入 changed rows", () => {
   const oldRow = {
     訂單編號: "OD123",
@@ -197,6 +234,17 @@ test("near-checkin cache hit must refetch", () => {
   assert.equal(reason, "near_checkin_scheduled_refresh");
   assert.equal(counters.nearCheckinCacheHitRefetched, 1);
   assert.equal(counters.cacheHitSkipped, 0);
+});
+
+test("parseOdinDateYMD_ 支援 YYYY/MM/DD 與補零標準化", () => {
+  assert.deepEqual(parseOdinDateYMD_("2026/05/09"), { ok: true, ymd: "2026-05-09" });
+  assert.deepEqual(parseOdinDateYMD_("2026/5/9"), { ok: true, ymd: "2026-05-09" });
+  assert.deepEqual(parseOdinDateYMD_("2026-05-09"), { ok: true, ymd: "2026-05-09" });
+});
+
+test("near-checkin 在 today=2026-05-07, N=3, 2026/05/09~2026/05/12 應命中", () => {
+  const out = getNearCheckinDecision_("2026/05/09", "2026/05/12", 3, "2026-05-07");
+  assert.equal(out.isNearCheckinOrder, true);
 });
 
 test("cache new but current row old 仍判定 changed", () => {
