@@ -863,6 +863,18 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
     return s;
   }
 
+  // ✅ 電話遮罩（log-only）：
+  // - 避免 detail compared log 直接輸出完整電話
+  // - 可安全處理 undefined / null / 空字串 / 非字串輸入，確保不拋錯中斷流程
+  function maskPhone_(value) {
+    const s = String(value || "").trim();
+    if (!s) return "";
+    const digits = s.replace(/\D+/g, "");
+    if (!digits) return "***";
+    if (digits.length <= 4) return "***" + digits.slice(-2);
+    return digits.slice(0, 3) + "***" + digits.slice(-3);
+  }
+
   // ✅ 取消單判斷：只看「明確欄位/旗標」
   function getStatusText(it) {
     const v = pick(it, [
@@ -1585,8 +1597,8 @@ function detectRoomTypeChange(oldRow, newRow) {
               changedFields,
               oldRoomType: rowBefore.roomType,
               newRoomType: detailAfter.roomType,
-              oldPhoneMasked: maskPhone(rowBefore.phone),
-              newPhoneMasked: maskPhone(detailAfter.phone),
+              oldPhoneMasked: maskPhone_(rowBefore.phone),
+              newPhoneMasked: maskPhone_(detailAfter.phone),
               oldProjectName: rowBefore.projectName,
               newProjectName: detailAfter.projectName,
               cacheRoomType: String((cachedBefore && cachedBefore.roomType) || ""),
