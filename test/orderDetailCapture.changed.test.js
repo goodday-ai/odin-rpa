@@ -49,7 +49,7 @@ function parseDetailRefreshHour_(raw) {
 
 // 中文註解：提供 detail policy 的理由分類，確保營運摘要統計與是否重打判斷一致。
 function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
-  if (detailForceRefreshEffective) return "force";
+  if (detailForceRefreshEffective) return "force_refresh";
   if (!cacheOk) return "cache_miss";
   if (nearCheckinRefresh) return "near_checkin_scheduled_refresh";
   return "cache_hit_skip";
@@ -124,7 +124,7 @@ test("explicit force refresh 仍可全量重打 detail", () => {
 
 test("detail fetch reason 分類與 shouldFetchDetailByPolicy 一致", () => {
   const cases = [
-    { input: { detailForceRefreshEffective: true, nearCheckinRefresh: false, cacheOk: true }, expected: "force", fetch: true },
+    { input: { detailForceRefreshEffective: true, nearCheckinRefresh: false, cacheOk: true }, expected: "force_refresh", fetch: true },
     { input: { detailForceRefreshEffective: false, nearCheckinRefresh: true, cacheOk: true }, expected: "near_checkin_scheduled_refresh", fetch: true },
     { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: false }, expected: "cache_miss", fetch: true },
     { input: { detailForceRefreshEffective: false, nearCheckinRefresh: false, cacheOk: true }, expected: "cache_hit_skip", fetch: false }
@@ -184,4 +184,25 @@ test("roomType changed summary 統計正確", () => {
   const roomTypeChangedRows = oldRow.房型 !== newRow.房型 ? 1 : 0;
   assert.equal(changedRows.length, 1);
   assert.equal(roomTypeChangedRows, 1);
+});
+
+test("near-checkin cache hit must refetch", () => {
+  const counters = { nearCheckinCacheHitRefetched: 0, cacheHitSkipped: 0 };
+  const input = { detailForceRefreshEffective: false, nearCheckinRefresh: true, cacheOk: true };
+  const reason = getDetailFetchReasonByPolicy(input);
+  const shouldFetch = shouldFetchDetailByPolicy(input);
+  if (reason === "near_checkin_scheduled_refresh" && input.cacheOk) counters.nearCheckinCacheHitRefetched += 1;
+  if (!shouldFetch) counters.cacheHitSkipped += 1;
+  assert.equal(shouldFetch, true);
+  assert.equal(reason, "near_checkin_scheduled_refresh");
+  assert.equal(counters.nearCheckinCacheHitRefetched, 1);
+  assert.equal(counters.cacheHitSkipped, 0);
+});
+
+test("cache new but current row old 仍判定 changed", () => {
+  const cache = { roomType: "新房型", phone: "0912", projectName: "A" };
+  const row = { roomType: "舊房型", phone: "0912", projectName: "A" };
+  const detail = { roomType: "新房型", phone: "0912", projectName: "A" };
+  const changedFields = ["roomType", "phone", "projectName"].filter((f) => detail[f] !== cache[f] || detail[f] !== row[f]);
+  assert.equal(changedFields.includes("roomType"), true);
 });

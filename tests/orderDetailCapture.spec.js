@@ -193,7 +193,7 @@ test("odin capture orders by API (calendar_list -> sheet-ready) [multi-hotel]", 
   const detailForceRefreshEffective = detailForceRefresh;
   // ✅ 中文註解：回傳 detail 抓取原因分類，供營運摘要統計使用，且不改既有策略語意。
   function getDetailFetchReasonByPolicy({ detailForceRefreshEffective, nearCheckinRefresh, cacheOk }) {
-    if (detailForceRefreshEffective) return "force";
+    if (detailForceRefreshEffective) return "force_refresh";
     if (!cacheOk) return "cache_miss";
     if (nearCheckinRefresh) return "near_checkin_scheduled_refresh";
     return "cache_hit_skip";
@@ -1349,6 +1349,9 @@ function detectRoomTypeChange(oldRow, newRow) {
     const detailNearCheckinEligible = { count: 0 };
     const detailNearCheckinRefresh = { count: 0 };
     const detailNearCheckinCacheHitRefetched = { count: 0 };
+    const detailCompared = { count: 0 };
+    const detailUnchanged = { count: 0 };
+    const detailChanged = { count: 0 };
     const detailForceRefreshCount = { count: 0 };
     const detailFetchCount = { count: 0 };
     const roomTypeRefreshed = { count: 0 };
@@ -1476,8 +1479,9 @@ function detectRoomTypeChange(oldRow, newRow) {
             detailNearCheckinRefresh.count++;
             if (cacheOk) detailNearCheckinCacheHitRefetched.count++;
           }
-          if (fetchReason === "force") detailForceRefreshCount.count++;
+          if (fetchReason === "force_refresh") detailForceRefreshCount.count++;
           if (fetchReason === "cache_miss") detailCacheMiss.count++;
+          order.detailFetchReason = fetchReason;
           detailTargets.push(order);
         }
         console.log("[ODIN_DETAIL] near-checkin decision sample", nearCheckinDecisionSamples);
@@ -1497,6 +1501,12 @@ function detectRoomTypeChange(oldRow, newRow) {
             throw err;
           }
           if (detailRes.ok && detailRes.json && typeof detailRes.json === "object") {
+            const cachedBefore = detailCacheMap && detailCacheMap[order.key] ? detailCacheMap[order.key] : {};
+            const rowBefore = {
+              projectName: String(order.projectName || ""),
+              roomType: String(order.roomType || ""),
+              phone: String(order.phone || "")
+            };
             const extractedProject = extractProjectNameFromDetail(detailRes.json);
             const extractedRoomType = extractRoomTypeFromDetail(detailRes.json);
             const extractedPhone = extractPhoneFromDetail(detailRes.json);
@@ -1517,6 +1527,39 @@ function detectRoomTypeChange(oldRow, newRow) {
               }
             }
             if (extractedPhone) order.phone = normalizePhone(extractedPhone);
+            const detailAfter = {
+              projectName: String(order.projectName || ""),
+              roomType: String(order.roomType || ""),
+              phone: String(order.phone || "")
+            };
+            const changedFields = [];
+            const compareFields = ["roomType", "phone", "projectName"];
+            for (const field of compareFields) {
+              const cacheVal = String((cachedBefore && cachedBefore[field]) || "");
+              const rowVal = String((rowBefore && rowBefore[field]) || "");
+              const detailVal = String((detailAfter && detailAfter[field]) || "");
+              if (detailVal !== cacheVal || detailVal !== rowVal) changedFields.push(field);
+            }
+            const changed = changedFields.length > 0;
+            detailCompared.count++;
+            if (changed) detailChanged.count++;
+            else detailUnchanged.count++;
+            console.log("[ODIN_DETAIL] detail compared", {
+              hotelId,
+              orderSerial: order.key,
+              fetchReason: order.detailFetchReason || "unknown",
+              changed,
+              changedFields,
+              oldRoomType: rowBefore.roomType,
+              newRoomType: detailAfter.roomType,
+              oldPhoneMasked: maskPhone(rowBefore.phone),
+              newPhoneMasked: maskPhone(detailAfter.phone),
+              oldProjectName: rowBefore.projectName,
+              newProjectName: detailAfter.projectName,
+              cacheRoomType: String((cachedBefore && cachedBefore.roomType) || ""),
+              rowRoomType: rowBefore.roomType,
+              detailRoomType: detailAfter.roomType
+            });
 
             detailCacheMap[order.key] = {
               projectName: order.projectName || "",
@@ -1806,7 +1849,10 @@ function detectRoomTypeChange(oldRow, newRow) {
         cacheMissFetched: detailCacheMiss.count,
         nearCheckinFetched: detailNearCheckinRefresh.count,
         forceFetched: detailForceRefreshCount.count,
-        totalFetched: detailFetchCount.count
+        totalFetched: detailFetchCount.count,
+        detailCompared: detailCompared.count,
+        detailUnchanged: detailUnchanged.count,
+        detailChanged: detailChanged.count
       },
       roomType: {
         refreshed: roomTypeRefreshed.count,
