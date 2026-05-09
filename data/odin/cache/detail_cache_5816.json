@@ -1672,5 +1672,11 @@
     "roomType": "O",
     "phone": "",
     "updatedAt": "2026-05-09"
+  },
+  "OBE86910581626050902": {
+    "projectName": "OTA串接專案",
+    "roomType": "M5",
+    "phone": "",
+    "updatedAt": "2026-05-09"
   }
 }
