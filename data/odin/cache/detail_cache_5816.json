@@ -719,12 +719,6 @@
     "phone": "0934335313",
     "updatedAt": "2026-04-26"
   },
-  "OBE85360581626030702": {
-    "projectName": "OTA串接專案",
-    "roomType": "M3｜Z1",
-    "phone": "0984266711",
-    "updatedAt": "2026-04-26"
-  },
   "OBE67210581626030704": {
     "projectName": "OTA串接專案",
     "roomType": "Z2",
@@ -1677,6 +1671,12 @@
     "projectName": "OTA串接專案",
     "roomType": "M5",
     "phone": "",
+    "updatedAt": "2026-05-09"
+  },
+  "OBE65360581626050903": {
+    "projectName": "OTA串接專案",
+    "roomType": "M5｜Z5",
+    "phone": "0984266711",
     "updatedAt": "2026-05-09"
   }
 }
