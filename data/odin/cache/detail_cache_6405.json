@@ -742,5 +742,11 @@
     "roomType": "3F",
     "phone": "0912114072",
     "updatedAt": "2026-05-10"
+  },
+  "OBE92960640526051001": {
+    "projectName": "OTA售價",
+    "roomType": "2F",
+    "phone": "",
+    "updatedAt": "2026-05-10"
   }
 }
