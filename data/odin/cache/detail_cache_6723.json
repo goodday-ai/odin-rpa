@@ -1102,5 +1102,17 @@
     "roomType": "5F",
     "phone": "",
     "updatedAt": "2026-05-11"
+  },
+  "OBE18710672326051103": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "4F｜5F",
+    "phone": "0900333221",
+    "updatedAt": "2026-05-11"
+  },
+  "OBE96160672326051102": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "5F",
+    "phone": "0966869680",
+    "updatedAt": "2026-05-11"
   }
 }
