@@ -1120,5 +1120,29 @@
     "roomType": "2F",
     "phone": "0981308808",
     "updatedAt": "2026-05-12"
+  },
+  "OBE95960672326051203": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "4F",
+    "phone": "0966554332",
+    "updatedAt": "2026-05-12"
+  },
+  "OBE31730672326051204": {
+    "projectName": "二臥室套房",
+    "roomType": "5F",
+    "phone": "0952357066",
+    "updatedAt": "2026-05-12"
+  },
+  "OBE42400672326051205": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "4F",
+    "phone": "0966331654",
+    "updatedAt": "2026-05-12"
+  },
+  "OBE64710672326051206": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "4F",
+    "phone": "0938959292",
+    "updatedAt": "2026-05-12"
   }
 }
