@@ -1156,5 +1156,23 @@
     "roomType": "3F",
     "phone": "0908196225",
     "updatedAt": "2026-05-13"
+  },
+  "OBE79230672326051301": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "2F",
+    "phone": "0977268866",
+    "updatedAt": "2026-05-13"
+  },
+  "OBE42380672326051302": {
+    "projectName": "官網專屬不可取消優惠",
+    "roomType": "3F",
+    "phone": "0919108110",
+    "updatedAt": "2026-05-13"
+  },
+  "OBE92730672326051303": {
+    "projectName": "OTA 與官網原始價格",
+    "roomType": "3F",
+    "phone": "0928360610",
+    "updatedAt": "2026-05-13"
   }
 }
