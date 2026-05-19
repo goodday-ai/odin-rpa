@@ -39,7 +39,7 @@
     "projectName": "同業訂房(14人)",
     "roomType": "包棟",
     "phone": "0937392199",
-    "updatedAt": "2026-05-19"
+    "updatedAt": "2026-05-20"
   },
   "OBE35820672125122201": {
     "projectName": "OTA 與官網原始價格",
@@ -105,7 +105,7 @@
     "projectName": "同業訂房(舊專案不使用)｜官網專屬連住優惠",
     "roomType": "包棟",
     "phone": "0933696013",
-    "updatedAt": "2026-05-19"
+    "updatedAt": "2026-05-20"
   },
   "OBE30080672126020201": {
     "projectName": "同業訂房(舊專案不使用)",
@@ -291,7 +291,7 @@
     "projectName": "官網專屬優惠",
     "roomType": "包棟",
     "phone": "0989334501",
-    "updatedAt": "2026-05-19"
+    "updatedAt": "2026-05-20"
   },
   "OBE81930672126041401": {
     "projectName": "官網專屬優惠",
@@ -370,5 +370,11 @@
     "roomType": "包棟",
     "phone": "0000000",
     "updatedAt": "2026-05-19"
+  },
+  "OBE12890672126051902": {
+    "projectName": "官網專屬連住優惠",
+    "roomType": "包棟",
+    "phone": "0000000",
+    "updatedAt": "2026-05-20"
   }
 }
