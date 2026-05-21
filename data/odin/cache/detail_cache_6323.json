@@ -45,7 +45,7 @@
     "projectName": "OTA與官網原始價格",
     "roomType": "弎居胡同",
     "phone": "0919686311",
-    "updatedAt": "2026-05-21"
+    "updatedAt": "2026-05-22"
   },
   "OBE82120632325122201": {
     "projectName": "官網專屬優惠",
@@ -57,7 +57,7 @@
     "projectName": "OTA與官網原始價格",
     "roomType": "弎居胡同",
     "phone": "0978053139",
-    "updatedAt": "2026-05-21"
+    "updatedAt": "2026-05-22"
   },
   "OBE19950632326010401": {
     "projectName": "官網專屬優惠",
@@ -231,13 +231,13 @@
     "projectName": "官網專屬優惠",
     "roomType": "弎居胡同",
     "phone": "0933086350",
-    "updatedAt": "2026-05-21"
+    "updatedAt": "2026-05-22"
   },
   "OBE43370632326041001": {
     "projectName": "OTA與官網原始價格",
     "roomType": "弎居胡同",
     "phone": "0987352609",
-    "updatedAt": "2026-05-21"
+    "updatedAt": "2026-05-22"
   },
   "OBE16880632326041101": {
     "projectName": "2026年官網專屬優惠(90天前預訂享早鳥優惠)",
@@ -346,5 +346,11 @@
     "roomType": "弎居胡同",
     "phone": "0911853699",
     "updatedAt": "2026-05-21"
+  },
+  "OBE95930632326052102": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "弎居胡同",
+    "phone": "",
+    "updatedAt": "2026-05-22"
   }
 }
