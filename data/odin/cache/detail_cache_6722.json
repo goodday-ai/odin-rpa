@@ -244,5 +244,11 @@
     "roomType": "包棟",
     "phone": "0988132780",
     "updatedAt": "2026-05-23"
+  },
+  "OBE09440672226052401": {
+    "projectName": "連住專案OTA",
+    "roomType": "包棟",
+    "phone": "",
+    "updatedAt": "2026-05-24"
   }
 }
