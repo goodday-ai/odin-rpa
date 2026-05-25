@@ -247,7 +247,7 @@
   },
   "OBE76380591726051202": {
     "projectName": "早鳥專案",
-    "roomType": "橙色301",
+    "roomType": "藍色202",
     "phone": "0905098581",
     "updatedAt": "2026-05-25"
   },
@@ -295,7 +295,7 @@
   },
   "OBE16990591726052203": {
     "projectName": "早鳥專案",
-    "roomType": "藍色202",
+    "roomType": "橙色301",
     "phone": "0905098581",
     "updatedAt": "2026-05-25"
   },
@@ -303,6 +303,12 @@
     "projectName": "booking",
     "roomType": "包棟",
     "phone": "0939173561",
+    "updatedAt": "2026-05-25"
+  },
+  "OBE95660591726052501": {
+    "projectName": "早鳥加2人｜早鳥專案",
+    "roomType": "粉色201｜藍色202｜灰色302",
+    "phone": "0905095851",
     "updatedAt": "2026-05-25"
   }
 }
