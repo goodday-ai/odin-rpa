@@ -1966,5 +1966,11 @@
     "roomType": "1",
     "phone": "0986968146",
     "updatedAt": "2026-05-28"
+  },
+  "OBE58620581626052706": {
+    "projectName": "OTA串接專案",
+    "roomType": "O",
+    "phone": "0981102303",
+    "updatedAt": "2026-05-28"
   }
 }
