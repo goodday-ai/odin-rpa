@@ -57,7 +57,7 @@
     "projectName": "Booking",
     "roomType": "包棟",
     "phone": "0921377215",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE45310645426031102": {
     "projectName": "Booking",
@@ -111,7 +111,7 @@
     "projectName": "官網專案",
     "roomType": "包棟",
     "phone": "0918388486",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE00840645426041501": {
     "projectName": "官網專案",
@@ -166,5 +166,11 @@
     "roomType": "包棟",
     "phone": "0988851597",
     "updatedAt": "2026-05-25"
+  },
+  "OBE12180645426052701": {
+    "projectName": "Booking",
+    "roomType": "包棟",
+    "phone": "0975035048",
+    "updatedAt": "2026-05-28"
   }
 }

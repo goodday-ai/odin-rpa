@@ -297,7 +297,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z1｜M1｜M3",
     "phone": "0970063817",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE49750581626013101": {
     "projectName": "官網訂房專案",
@@ -657,7 +657,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3",
     "phone": "0905801992",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE84430581626030402": {
     "projectName": "官網訂房專案",
@@ -807,7 +807,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M1",
     "phone": "0955062530",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE14470581626031604": {
     "projectName": "官網訂房專案 -  4人入住",
@@ -885,7 +885,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M2｜M5｜Z5",
     "phone": "0928598510",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE78720581626031901": {
     "projectName": "OTA串接專案",
@@ -1023,7 +1023,7 @@
     "projectName": "OTA串接專案",
     "roomType": "1",
     "phone": "(886)0983618309",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE64570581626033102": {
     "projectName": "OTA串接專案",
@@ -1041,7 +1041,7 @@
     "projectName": "官網訂房專案",
     "roomType": "Z3",
     "phone": "0921057953",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE03480581626040103": {
     "projectName": "OTA串接專案",
@@ -1095,7 +1095,7 @@
     "projectName": "OTA串接專案",
     "roomType": "O",
     "phone": "0928873333",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE17140581626040603": {
     "projectName": "OTA串接專案",
@@ -1161,7 +1161,7 @@
     "projectName": "OTA串接專案",
     "roomType": "O",
     "phone": "0931379960",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE21750581626040902": {
     "projectName": "官網訂房專案 - 2人入住",
@@ -1191,7 +1191,7 @@
     "projectName": "官網訂房專案 - 2人入住｜官網訂房專案 -  4人入住",
     "roomType": "M2｜M5",
     "phone": "09333735",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE24320581626041006": {
     "projectName": "OTA串接專案",
@@ -1221,7 +1221,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M3",
     "phone": "0918085736",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE19230581626041102": {
     "projectName": "OTA串接專案",
@@ -1263,7 +1263,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3｜Z1",
     "phone": "0928733059",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE87370581626041503": {
     "projectName": "OTA串接專案",
@@ -1509,7 +1509,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z2",
     "phone": "0988086383",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE47670581626050203": {
     "projectName": "官網訂房專案",
@@ -1551,7 +1551,7 @@
     "projectName": "OTA串接專案",
     "roomType": "1",
     "phone": "0968725322",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE08170581626050501": {
     "projectName": "OTA串接專案",
@@ -1604,12 +1604,6 @@
   "OBE09630581626050804": {
     "projectName": "OTA串接專案",
     "roomType": "O",
-    "phone": "",
-    "updatedAt": "2026-05-09"
-  },
-  "OBE86910581626050902": {
-    "projectName": "OTA串接專案",
-    "roomType": "M5",
     "phone": "",
     "updatedAt": "2026-05-09"
   },
@@ -1893,13 +1887,13 @@
     "projectName": "OTA串接專案",
     "roomType": "Z1",
     "phone": "",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE99380581626052401": {
     "projectName": "官網訂房專案 - 2人入住",
     "roomType": "Z2",
     "phone": "0925855672",
-    "updatedAt": "2026-05-27"
+    "updatedAt": "2026-05-28"
   },
   "OBE61650581626052402": {
     "projectName": "OTA串接專案",
@@ -1960,5 +1954,17 @@
     "roomType": "O",
     "phone": "0900568593",
     "updatedAt": "2026-05-27"
+  },
+  "OBE38080581626052704": {
+    "projectName": "OTA串接專案",
+    "roomType": "1",
+    "phone": "0919226600",
+    "updatedAt": "2026-05-28"
+  },
+  "OBE51720581626052705": {
+    "projectName": "OTA串接專案",
+    "roomType": "1",
+    "phone": "0986968146",
+    "updatedAt": "2026-05-28"
   }
 }
