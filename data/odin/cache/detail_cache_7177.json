@@ -1391,16 +1391,22 @@
     "phone": "0968339967",
     "updatedAt": "2026-05-28"
   },
-  "OBE02770717726052806": {
-    "projectName": "OTA與官網原始價格",
-    "roomType": "303(雙)",
-    "phone": "0988954121",
-    "updatedAt": "2026-05-28"
-  },
   "OBE06050717726052807": {
     "projectName": "OTA與官網原始價格",
     "roomType": "303(雙)",
     "phone": "0910811585",
+    "updatedAt": "2026-05-29"
+  },
+  "OBE34370717726052808": {
+    "projectName": "雙人房",
+    "roomType": "303(雙)",
+    "phone": "0988954121",
+    "updatedAt": "2026-05-29"
+  },
+  "OBE38020717726052809": {
+    "projectName": "三人房",
+    "roomType": "205(三)",
+    "phone": "0968377718",
     "updatedAt": "2026-05-29"
   }
 }
