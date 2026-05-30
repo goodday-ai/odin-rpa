@@ -1978,5 +1978,11 @@
     "roomType": "1",
     "phone": "0988777729",
     "updatedAt": "2026-05-30"
+  },
+  "OBE67110581626053001": {
+    "projectName": "OTA串接專案",
+    "roomType": "Z3",
+    "phone": "0968003908",
+    "updatedAt": "2026-05-30"
   }
 }
