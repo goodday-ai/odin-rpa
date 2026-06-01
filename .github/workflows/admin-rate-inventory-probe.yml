@@ -1,0 +1,155 @@
+# 功能：手動執行 Admin Rate Inventory Network Probe，讓維運者下載 sanitized 後台房價庫存 API 觀測 JSON。
+# 責任：僅支援 workflow_dispatch，登入單一 Owlting 後台目標頁、執行單次 network probe、稽核輸出後上傳短期 artifact。
+# 關聯模組：scripts/adminRateInventoryProbe.js、lib/adminRateInventoryProbe/*、tests/adminRateInventoryProbe.unit.test.js。
+# 關鍵流程：checkout → npm ci → install chromium → unit test → live probe → sanitized artifact audit → upload JSON artifact。
+name: Admin Rate Inventory Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: "Tenant key"
+        required: true
+        default: "goodday"
+      hotel_id:
+        description: "Owlting admin hotelId"
+        required: true
+      target_url:
+        description: "Admin Rate Inventory page URL copied from browser"
+        required: true
+      start:
+        description: "Probe start date YYYY-MM-DD"
+        required: true
+        default: "2026-06-01"
+      end:
+        description: "Probe end date YYYY-MM-DD"
+        required: true
+        default: "2026-08-31"
+      capture_window_ms:
+        description: "Capture window in ms"
+        required: false
+        default: "5000"
+      timeout_ms:
+        description: "Probe timeout in ms"
+        required: false
+        default: "15000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-rate-inventory-probe-${{ inputs.tenant }}-${{ inputs.hotel_id }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ADMIN_RATE_PROBE_ENABLED: "1"
+      ADMIN_RATE_PROBE_TENANT: ${{ inputs.tenant }}
+      ADMIN_RATE_PROBE_HOTEL_ID: ${{ inputs.hotel_id }}
+      ADMIN_RATE_PROBE_TARGET_URL: ${{ inputs.target_url }}
+      ADMIN_RATE_PROBE_START: ${{ inputs.start }}
+      ADMIN_RATE_PROBE_END: ${{ inputs.end }}
+      ADMIN_RATE_PROBE_LANG: "zh_TW"
+      ADMIN_RATE_PROBE_CAPTURE_WINDOW_MS: ${{ inputs.capture_window_ms }}
+      ADMIN_RATE_PROBE_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+      ADMIN_RATE_PROBE_OUT_DIR: "out"
+      ADMIN_RATE_PROBE_MAX_JSON_BYTES: "800000"
+      ADMIN_RATE_PROBE_MAX_JSON_RESPONSES: "30"
+      ADMIN_RATE_PROBE_MAX_CANDIDATES: "15"
+      ADMIN_RATE_PROBE_ALLOWLIST_ORIGINS: "https://www.owlting.com,https://api.owlting.com"
+      ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
+      ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Admin Rate Inventory Probe unit tests
+        run: npm run test:admin-rate-inventory-probe
+
+      - name: Run Admin Rate Inventory Probe
+        run: npm run probe:admin-rate-inventory
+
+      - name: Audit sanitized Admin Rate Inventory Probe output
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const outDir = 'out';
+          const files = fs.existsSync(outDir)
+            ? fs.readdirSync(outDir).filter((name) => /^admin_rate_inventory_probe_.*\.json$/.test(name))
+            : [];
+
+          if (!files.length) {
+            throw new Error('No admin rate inventory probe output JSON found');
+          }
+
+          const bannedKeys = new Set([
+            'authorization', 'bearer', 'token', 'cookie', 'secret', 'password', 'email', 'phone',
+            'mobile', 'tel', 'order', 'uuid', 'customer', 'guest', 'headers', 'rawbody', 'rawBody'
+          ].map((key) => key.toLowerCase()));
+          const bannedValueRe = /(authorization|bearer|token|cookie|secret|password|email|phone|mobile|\btel\b|order|uuid|customer|guest|headers|rawbody)/i;
+          const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+          const phoneLikeRe = /\+?\d[\d\s().-]{7,}/;
+
+          function normalizeKey(key) {
+            return String(key).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+          }
+
+          function audit(value, trail = '$') {
+            if (Array.isArray(value)) {
+              value.forEach((item, index) => audit(item, `${trail}[${index}]`));
+              return;
+            }
+            if (value && typeof value === 'object') {
+              for (const [key, child] of Object.entries(value)) {
+                const normalized = normalizeKey(key);
+                if (bannedKeys.has(normalized)) {
+                  throw new Error(`Sanitized output audit failed: banned key ${key} at ${trail}`);
+                }
+                audit(child, `${trail}.${key}`);
+              }
+              return;
+            }
+            if (typeof value === 'string') {
+              const digitCount = (value.match(/\d/g) || []).length;
+              if (bannedValueRe.test(value) || emailRe.test(value) || (phoneLikeRe.test(value) && digitCount >= 9)) {
+                throw new Error(`Sanitized output audit failed: banned value at ${trail}`);
+              }
+              if (/^https?:\/\//i.test(value) && value.includes('?')) {
+                throw new Error(`Sanitized output audit failed: URL query value at ${trail}`);
+              }
+            }
+          }
+
+          for (const file of files) {
+            const fullPath = path.join(outDir, file);
+            audit(JSON.parse(fs.readFileSync(fullPath, 'utf8')));
+          }
+
+          console.log(`sanitized output audit ok: ${files.join(', ')}`);
+          NODE
+
+      - name: Upload Admin Rate Inventory Probe artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: admin-rate-inventory-probe-${{ inputs.tenant }}-${{ inputs.hotel_id }}-${{ inputs.start }}-${{ inputs.end }}
+          path: out/admin_rate_inventory_probe_*.json
+          if-no-files-found: error
+          retention-days: 3
