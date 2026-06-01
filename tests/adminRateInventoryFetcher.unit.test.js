@@ -79,6 +79,124 @@ test("normalizer extracts date/price/inventory/name from nested calendar-like pa
   assert.equal(normalized.items[0].currency, "TWD");
 });
 
+
+
+test("normalizer extracts Owlting room/date/numeric plan shape", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    status: "success",
+    data: [
+      {
+        room_id: 57201,
+        room_name: "2F 包層",
+        calendar: [
+          {
+            date: "2026-06-01",
+            count: 1,
+            max_stock_count: 1,
+            is_lock: false,
+            is_allow_update: true,
+            plans: {
+              42144: { id: 42144, name: "Booking", price: 24000, currency: "TWD", is_allow_booking: true, min_los: 1, cta: false, ctd: false },
+              42145: { name: "Agoda", price: 30000, currency: "TWD", is_allow_booking: false, min_los: 2, cta: true, ctd: false },
+            },
+          },
+          {
+            date: "2026-06-02",
+            count: 0,
+            max_stock_count: 1,
+            is_lock: true,
+            plans: {
+              42144: { name: "Booking", price: 18000, currency: "TWD", is_allow_booking: true, min_los: 1, cta: false, ctd: true },
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.items.length, 3);
+  assert.equal(normalized.items[0].date, "2026-06-01");
+  assert.equal(normalized.items[0].salesUnitId, "57201");
+  assert.equal(normalized.items[0].salesUnitName, "2F 包層");
+  assert.equal(normalized.items[0].roomTypeId, "57201");
+  assert.equal(normalized.items[0].roomTypeName, "2F 包層");
+  assert.equal(normalized.items[0].planId, "42144");
+  assert.equal(normalized.items[0].planName, "Booking");
+  assert.equal(normalized.items[0].channel, "Booking");
+  assert.equal(normalized.items[0].price, 24000);
+  assert.equal(normalized.items[0].currency, "TWD");
+  assert.equal(normalized.items[0].inventory, 1);
+  assert.equal(normalized.items[0].maxInventory, 1);
+  assert.equal(normalized.items[0].available, true);
+  assert.equal(normalized.items[0].minLos, 1);
+  assert.equal(normalized.items[0].cta, false);
+  assert.equal(normalized.items[0].ctd, false);
+
+  const bookingLocked = normalized.items.find((item) => item.date === "2026-06-02" && item.planId === "42144");
+  const agodaClosed = normalized.items.find((item) => item.date === "2026-06-01" && item.planId === "42145");
+  assert.equal(bookingLocked.available, false);
+  assert.equal(agodaClosed.available, false);
+  assert.equal(normalized.summary.itemCount, 3);
+  assert.equal(normalized.summary.dateCount, 2);
+  assert.equal(normalized.summary.salesUnitCount, 1);
+  assert.equal(normalized.summary.channelCount, 2);
+  assert.equal(normalized.summary.minPrice, 18000);
+  assert.equal(normalized.summary.maxPrice, 30000);
+  assert.equal(normalized.summary.availableItemCount, 1);
+  assert.equal(normalized.summary.zeroInventoryItemCount, 1);
+  assert.equal(normalized.summary.minLosCount, 3);
+  assert.equal(normalized.summary.closedItemCount, 2);
+  assert.equal(normalized.summary.truncated, false);
+});
+
+test("normalizer limits items to 500 and sets truncated=true", () => {
+  const calendar = Array.from({ length: 501 }, (_, index) => ({
+    date: `2026-06-${String((index % 28) + 1).padStart(2, "0")}`,
+    count: 1,
+    max_stock_count: 1,
+    plans: {
+      [String(42000 + index)]: { name: `Plan ${index}`, price: 1000 + index, currency: "TWD", is_allow_booking: true },
+    },
+  }));
+
+  const normalized = normalizeCalendarsRateInventory({ data: [{ room_id: "room-a", room_name: "A", calendar }] });
+
+  assert.equal(normalized.items.length, 500);
+  assert.equal(normalized.truncated, true);
+  assert.equal(normalized.summary.truncated, true);
+});
+
+test("shapeSummary includes safe diagnostic path samples", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    status: "success",
+    data: [
+      {
+        room_id: 57201,
+        room_name: "2F 包層",
+        calendar: [
+          {
+            date: "2026-06-01",
+            max_stock_count: 1,
+            plans: {
+              42144: { name: "Booking", price: 0, currency: "TWD" },
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.ok, false);
+  assert.deepEqual(normalized.shapeSummary.topLevelKeys, ["status", "data"]);
+  assert.ok(normalized.shapeSummary.datePathSamples.includes("$.data[0].calendar[0].date"));
+  assert.ok(normalized.shapeSummary.pricePathSamples.includes("$.data[0].calendar[0].plans.42144.price"));
+  assert.ok(normalized.shapeSummary.inventoryPathSamples.includes("$.data[0].calendar[0].max_stock_count"));
+  assert.ok(normalized.shapeSummary.roomPathSamples.includes("$.data[0].room_name"));
+  assert.ok(normalized.shapeSummary.numericKeyPathSamples.includes("$.data[0].calendar[0].plans.42144"));
+  assert.equal(JSON.stringify(normalized).includes("Booking"), false);
+});
+
 test("normalizer computes minPrice/maxPrice/dateCount/itemCount", () => {
   const normalized = normalizeCalendarsRateInventory({
     items: [
