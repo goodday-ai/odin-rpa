@@ -1,0 +1,92 @@
+# 功能：手動執行 Admin Rate Inventory Fetcher Dry Run，直接呼叫 Owlting calendars range API 並上傳 sanitized snapshot。
+# 責任：僅支援 workflow_dispatch，登入單一 tenant/hotelId、單次 fetch 指定日期區間、稽核輸出後上傳短期 artifact。
+# 關聯模組：scripts/adminRateInventoryFetcherDryRun.js、lib/adminRateInventoryFetcher/*、tests/adminRateInventoryFetcher.unit.test.js。
+# 關鍵流程：checkout → npm ci → install chromium → unit test → dry-run fetcher → sanitized artifact audit → upload JSON artifact。
+name: Admin Rate Inventory Fetcher Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: "Tenant key"
+        required: true
+        default: "goodday"
+      hotel_id:
+        description: "Owlting admin hotelId"
+        required: true
+        default: "5720"
+      start:
+        description: "Range start date YYYY-MM-DD"
+        required: true
+        default: "2026-06-01"
+      end:
+        description: "Range end date YYYY-MM-DD"
+        required: true
+        default: "2026-08-31"
+      timeout_ms:
+        description: "Dry-run timeout in ms"
+        required: false
+        default: "15000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.hotel_id }}
+  cancel-in-progress: true
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ADMIN_RATE_FETCHER_ENABLED: "1"
+      ADMIN_RATE_FETCHER_TENANT: ${{ inputs.tenant }}
+      ADMIN_RATE_FETCHER_HOTEL_ID: ${{ inputs.hotel_id }}
+      ADMIN_RATE_FETCHER_START: ${{ inputs.start }}
+      ADMIN_RATE_FETCHER_END: ${{ inputs.end }}
+      ADMIN_RATE_FETCHER_LANG: "zh_TW"
+      ADMIN_RATE_FETCHER_OUT_DIR: "out"
+      ADMIN_RATE_FETCHER_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+      ADMIN_RATE_FETCHER_MAX_JSON_BYTES: "2000000"
+      ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
+      ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Admin Rate Inventory Fetcher unit tests
+        run: npm run test:admin-rate-inventory-fetcher
+
+      - name: Run Admin Rate Inventory Fetcher Dry Run
+        run: npm run dryrun:admin-rate-inventory-fetcher
+
+      - name: Audit sanitized Admin Rate Inventory Fetcher output
+        run: |
+          node - <<'NODE'
+          const { auditSanitizedAdminRateInventoryOutDir } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
+
+          const files = auditSanitizedAdminRateInventoryOutDir('out');
+          console.log(`sanitized output audit ok: ${files.join(', ')}`);
+          NODE
+
+      - name: Upload Admin Rate Inventory Fetcher artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.hotel_id }}-${{ inputs.start }}-${{ inputs.end }}
+          path: out/admin_rate_inventory_fetcher_dryrun_*.json
+          if-no-files-found: error
+          retention-days: 3
