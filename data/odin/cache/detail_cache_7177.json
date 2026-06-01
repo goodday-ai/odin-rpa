@@ -1279,7 +1279,7 @@
   },
   "OBE37050717726052505": {
     "projectName": "雙人房",
-    "roomType": "101(雙)",
+    "roomType": "203(雙)",
     "phone": "0978357003",
     "updatedAt": "2026-06-01"
   },
@@ -1357,7 +1357,7 @@
   },
   "OBE94670717726052802": {
     "projectName": "OTA與官網原始價格",
-    "roomType": "202(四)",
+    "roomType": "302(四)",
     "phone": "0968339967",
     "updatedAt": "2026-06-01"
   },
@@ -1409,15 +1409,9 @@
     "phone": "0968377718",
     "updatedAt": "2026-05-31"
   },
-  "OBE56340717726053004": {
-    "projectName": "三人房",
-    "roomType": "305(三)",
-    "phone": "0968377718",
-    "updatedAt": "2026-05-31"
-  },
   "OBE84050717726053005": {
     "projectName": "雙人房",
-    "roomType": "201(雙)",
+    "roomType": "303(雙)",
     "phone": "",
     "updatedAt": "2026-06-01"
   },
@@ -1429,13 +1423,13 @@
   },
   "OBE22920717726053102": {
     "projectName": "雙人房",
-    "roomType": "203(雙)",
+    "roomType": "101(雙)",
     "phone": "0981981176",
     "updatedAt": "2026-06-01"
   },
   "OBE11190717726060101": {
     "projectName": "OTA與官網原始價格",
-    "roomType": "303(雙)",
+    "roomType": "201(雙)",
     "phone": "0980683307",
     "updatedAt": "2026-06-01"
   },
@@ -1449,6 +1443,36 @@
     "projectName": "三人房",
     "roomType": "205(三)",
     "phone": "0974015561",
+    "updatedAt": "2026-06-01"
+  },
+  "OBE32920717726060104": {
+    "projectName": "同業價格",
+    "roomType": "205(三)｜102(四)",
+    "phone": "0985284571",
+    "updatedAt": "2026-06-01"
+  },
+  "OBE78120717726060105": {
+    "projectName": "雙人房",
+    "roomType": "301(雙)",
+    "phone": "0981120768",
+    "updatedAt": "2026-06-01"
+  },
+  "OBE79750717726060107": {
+    "projectName": "三人房",
+    "roomType": "205(三)",
+    "phone": "0968377718",
+    "updatedAt": "2026-06-01"
+  },
+  "OBE06740717726060106": {
+    "projectName": "雙人房",
+    "roomType": "303(雙)",
+    "phone": "0976108090",
+    "updatedAt": "2026-06-01"
+  },
+  "OBE73570717726060108": {
+    "projectName": "OTA與官網原始價格",
+    "roomType": "201(雙)｜102(四)",
+    "phone": "0982087556",
     "updatedAt": "2026-06-01"
   }
 }
