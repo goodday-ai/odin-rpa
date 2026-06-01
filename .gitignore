@@ -5,6 +5,3 @@ playwright-report
 test-results
 trace.zip
 .DS_Store
-out/booking_price_probe_*.json
-out/booking_price_probe_*.log
-out/booking_price_probe_raw_*
