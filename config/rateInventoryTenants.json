@@ -1,0 +1,13 @@
+{
+  "goodday": {
+    "enabled": true,
+    "tenant": "goodday",
+    "hotelId": "5720",
+    "displayName": "良辰吉日",
+    "days": 92,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": ["42144", "42145", "42166"],
+    "publishSalesUnitIdAllowlist": ["26669"],
+    "notes": "只 publish 官網對客可顯示專案；Booking / Booking 3F 暫不 publish"
+  }
+}
