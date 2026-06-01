@@ -88,61 +88,9 @@ jobs:
       - name: Audit sanitized Admin Rate Inventory Probe output
         run: |
           node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
+          const { auditSanitizedAdminRateProbeOutDir } = require('./lib/adminRateInventoryProbe/auditSanitizedAdminRateProbeOutput');
 
-          const outDir = 'out';
-          const files = fs.existsSync(outDir)
-            ? fs.readdirSync(outDir).filter((name) => /^admin_rate_inventory_probe_.*\.json$/.test(name))
-            : [];
-
-          if (!files.length) {
-            throw new Error('No admin rate inventory probe output JSON found');
-          }
-
-          const bannedKeys = new Set([
-            'authorization', 'bearer', 'token', 'cookie', 'secret', 'password', 'email', 'phone',
-            'mobile', 'tel', 'order', 'uuid', 'customer', 'guest', 'headers', 'rawbody', 'rawBody'
-          ].map((key) => key.toLowerCase()));
-          const bannedValueRe = /(authorization|bearer|token|cookie|secret|password|email|phone|mobile|\btel\b|order|uuid|customer|guest|headers|rawbody)/i;
-          const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-          const phoneLikeRe = /\+?\d[\d\s().-]{7,}/;
-
-          function normalizeKey(key) {
-            return String(key).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-          }
-
-          function audit(value, trail = '$') {
-            if (Array.isArray(value)) {
-              value.forEach((item, index) => audit(item, `${trail}[${index}]`));
-              return;
-            }
-            if (value && typeof value === 'object') {
-              for (const [key, child] of Object.entries(value)) {
-                const normalized = normalizeKey(key);
-                if (bannedKeys.has(normalized)) {
-                  throw new Error(`Sanitized output audit failed: banned key ${key} at ${trail}`);
-                }
-                audit(child, `${trail}.${key}`);
-              }
-              return;
-            }
-            if (typeof value === 'string') {
-              const digitCount = (value.match(/\d/g) || []).length;
-              if (bannedValueRe.test(value) || emailRe.test(value) || (phoneLikeRe.test(value) && digitCount >= 9)) {
-                throw new Error(`Sanitized output audit failed: banned value at ${trail}`);
-              }
-              if (/^https?:\/\//i.test(value) && value.includes('?')) {
-                throw new Error(`Sanitized output audit failed: URL query value at ${trail}`);
-              }
-            }
-          }
-
-          for (const file of files) {
-            const fullPath = path.join(outDir, file);
-            audit(JSON.parse(fs.readFileSync(fullPath, 'utf8')));
-          }
-
+          const files = auditSanitizedAdminRateProbeOutDir('out');
           console.log(`sanitized output audit ok: ${files.join(', ')}`);
           NODE
 
