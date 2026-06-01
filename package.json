@@ -5,8 +5,6 @@
   "main": "run.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "probe:booking-price": "node scripts/bookingPriceProbe.js",
-    "test:booking-price-probe": "node --test tests/bookingPriceProbe.unit.test.js",
     "probe:admin-rate-inventory": "node scripts/adminRateInventoryProbe.js",
     "test:admin-rate-inventory-probe": "node --test tests/adminRateInventoryProbe.unit.test.js",
     "dryrun:admin-rate-inventory-fetcher": "node scripts/adminRateInventoryFetcherDryRun.js",
