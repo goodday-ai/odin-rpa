@@ -255,7 +255,7 @@
     "projectName": "官網訂房專案",
     "roomType": "Z1｜M1｜M3",
     "phone": "0970323637",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE40660581626012601": {
     "projectName": "官網訂房專案｜官網訂房專案 -  4人入住",
@@ -651,7 +651,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3",
     "phone": "0905801992",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE84430581626030402": {
     "projectName": "官網訂房專案",
@@ -795,7 +795,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M1",
     "phone": "0955062530",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE14470581626031604": {
     "projectName": "官網訂房專案 -  4人入住",
@@ -897,7 +897,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M1｜M2",
     "phone": "0976226406",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE22970581626032202": {
     "projectName": "OTA串接專案",
@@ -1089,7 +1089,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M3",
     "phone": "0927390829",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE66530581626040604": {
     "projectName": "OTA串接專案",
@@ -1155,13 +1155,13 @@
     "projectName": "官網訂房專案 - 2人入住",
     "roomType": "M2",
     "phone": "0903137529",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE72860581626040903": {
     "projectName": "OTA串接專案",
     "roomType": "Z1",
     "phone": "0952176527",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE61260581626040904": {
     "projectName": "OTA串接專案",
@@ -1179,7 +1179,7 @@
     "projectName": "官網訂房專案 - 2人入住｜官網訂房專案 -  4人入住",
     "roomType": "Z2｜Z5",
     "phone": "0916755720",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE24320581626041006": {
     "projectName": "OTA串接專案",
@@ -1209,7 +1209,7 @@
     "projectName": "OTA串接專案",
     "roomType": "M3",
     "phone": "0918085736",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE19230581626041102": {
     "projectName": "OTA串接專案",
@@ -1221,7 +1221,7 @@
     "projectName": "OTA串接專案",
     "roomType": "O",
     "phone": "",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE18720581626041106": {
     "projectName": "OTA串接專案",
@@ -1341,7 +1341,7 @@
     "projectName": "OTA串接專案",
     "roomType": "1",
     "phone": "0911835087",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE38090581626042103": {
     "projectName": "OTA串接專案",
@@ -1617,7 +1617,7 @@
     "projectName": "OTA串接專案",
     "roomType": "1",
     "phone": "0963334436",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE25130581626051002": {
     "projectName": "OTA串接專案",
@@ -1773,7 +1773,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3",
     "phone": "0968627789",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE16250581626052001": {
     "projectName": "OTA串接專案",
@@ -1869,7 +1869,7 @@
     "projectName": "OTA串接專案",
     "roomType": "Z1",
     "phone": "",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE99380581626052401": {
     "projectName": "官網訂房專案 - 2人入住",
@@ -1919,12 +1919,6 @@
     "phone": "0987631036",
     "updatedAt": "2026-05-27"
   },
-  "OBE86750581626052701": {
-    "projectName": "OTA串接專案",
-    "roomType": "Z3",
-    "phone": "0905500600",
-    "updatedAt": "2026-05-27"
-  },
   "OBE95300581626052703": {
     "projectName": "OTA串接專案",
     "roomType": "Z3｜M2｜Z5",
@@ -1953,7 +1947,7 @@
     "projectName": "OTA串接專案",
     "roomType": "O",
     "phone": "0981102303",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
   },
   "OBE26110581626052802": {
     "projectName": "官網訂房專案 - 2人入住",
@@ -1995,6 +1989,12 @@
     "projectName": "OTA串接專案",
     "roomType": "Z3",
     "phone": "078185607",
-    "updatedAt": "2026-06-01"
+    "updatedAt": "2026-06-02"
+  },
+  "OBE14190581626060101": {
+    "projectName": "OTA串接專案",
+    "roomType": "O",
+    "phone": "0958213222",
+    "updatedAt": "2026-06-02"
   }
 }
