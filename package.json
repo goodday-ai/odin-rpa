@@ -4,7 +4,9 @@
   "description": "",
   "main": "run.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "probe:booking-price": "node scripts/bookingPriceProbe.js",
+    "test:booking-price-probe": "node --test tests/bookingPriceProbe.unit.test.js"
   },
   "keywords": [],
   "author": "",
