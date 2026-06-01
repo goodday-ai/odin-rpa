@@ -10,7 +10,8 @@
     "dryrun:admin-rate-inventory-fetcher": "node scripts/adminRateInventoryFetcherDryRun.js",
     "test:admin-rate-inventory-fetcher": "node --test tests/adminRateInventoryFetcher.unit.test.js",
     "sync:admin-rate-inventory-snapshot": "node scripts/adminRateInventorySnapshotSync.js",
-    "test:admin-rate-inventory-snapshot": "node --test tests/adminRateInventorySnapshot.unit.test.js"
+    "test:admin-rate-inventory-snapshot": "node --test tests/adminRateInventorySnapshot.unit.test.js",
+    "test:rate-inventory-snapshot-workflow": "node --test tests/rateInventorySnapshotWorkflow.unit.test.js"
   },
   "keywords": [],
   "author": "",

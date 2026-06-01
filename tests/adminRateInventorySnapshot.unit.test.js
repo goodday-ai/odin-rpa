@@ -226,3 +226,21 @@ test("manual normalized payload can build publishable goodday snapshot", () => {
   assert.equal(snapshot.items[0].planId, "42166");
   assert.equal(validateRateInventorySnapshotForPublish(snapshot, config).length, 0);
 });
+
+test("loads GitHub boolean publish input and tenant allowlist", () => {
+  const config = sampleConfig({ RATE_INVENTORY_PUBLISH_ENABLED: "true", RATE_INVENTORY_TENANT_ALLOWLIST: "goodday" });
+  assert.equal(config.publishEnabled, true);
+  assert.deepEqual(config.tenantAllowlist, ["goodday"]);
+  assert.equal(config.maxTenantsPerRun, 1);
+});
+
+test("stops before login when tenant is not allowlisted", () => {
+  assert.throws(
+    () => loadEnabledTenantConfig(baseEnv({ RATE_INVENTORY_TENANT_ALLOWLIST: "other" })),
+    /tenant_not_allowed/,
+  );
+  assert.throws(
+    () => loadEnabledTenantConfig(baseEnv({ RATE_INVENTORY_TENANT: "other", RATE_INVENTORY_TENANT_ALLOWLIST: "goodday" })),
+    /tenant_not_allowed/,
+  );
+});

@@ -1,0 +1,187 @@
+# 功能：手動驗證 Admin Rate Inventory Snapshot Sync v1，產出 LINE-readable goodday 價格庫存 snapshot artifact。
+# 責任：僅支援 workflow_dispatch，不新增 schedule；先 dry publish=false 產 artifact，再由人工確認後 publish=true 覆蓋 odin-data latest。
+# 關聯模組：scripts/adminRateInventorySnapshotSync.js、lib/adminRateInventorySnapshot/*、lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot.js。
+# 關鍵流程：checkout → npm ci → install chromium → unit/static tests → snapshot sync → sanitizer audit → optional odin-data publish → upload artifact。
+name: Rate Inventory Snapshot Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: "Tenant key"
+        required: true
+        default: "goodday"
+      publish_enabled:
+        description: "Publish latest snapshot to odin-data branch"
+        required: true
+        type: boolean
+        default: false
+      days:
+        description: "Days to fetch"
+        required: false
+        default: "92"
+      timeout_ms:
+        description: "Fetch timeout in ms"
+        required: false
+        default: "15000"
+      today:
+        description: "Optional fixed today YYYY-MM-DD for testing. Leave empty in normal use."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rate-inventory-snapshot-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Admin Rate Inventory Fetcher unit tests
+        run: npm run test:admin-rate-inventory-fetcher
+
+      - name: Run Admin Rate Inventory Snapshot unit tests
+        run: npm run test:admin-rate-inventory-snapshot
+
+      - name: Run Rate Inventory Snapshot workflow static tests
+        run: npm run test:rate-inventory-snapshot-workflow
+
+      - name: Run Rate Inventory Snapshot Sync
+        env:
+          RATE_INVENTORY_SYNC_ENABLED: "1"
+          RATE_INVENTORY_TENANT: ${{ inputs.tenant }}
+          RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json"
+          RATE_INVENTORY_DAYS: ${{ inputs.days }}
+          RATE_INVENTORY_MAX_DAYS: "92"
+          RATE_INVENTORY_MAX_ITEMS: "5000"
+          RATE_INVENTORY_OUT_DIR: "out"
+          RATE_INVENTORY_LANG: "zh_TW"
+          RATE_INVENTORY_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+          RATE_INVENTORY_PUBLISH_ENABLED: ${{ inputs.publish_enabled }}
+          RATE_INVENTORY_DATA_BRANCH: "odin-data"
+          RATE_INVENTORY_LATEST_DIR: "data/odin/rate_inventory/latest"
+          RATE_INVENTORY_TENANT_ALLOWLIST: "goodday"
+          RATE_INVENTORY_MAX_TENANTS_PER_RUN: "1"
+          ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
+          ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
+        run: |
+          if [ -n "${{ inputs.today }}" ]; then
+            export RATE_INVENTORY_TODAY="${{ inputs.today }}"
+          fi
+          npm run sync:admin-rate-inventory-snapshot
+
+      - name: Audit sanitized Rate Inventory Snapshot output
+        if: always()
+        run: |
+          if ! compgen -G "out/rate_inventory_snapshot_sync_*.json" > /dev/null; then
+            echo "No snapshot sync artifacts found; skip sanitized output audit."
+            exit 0
+          fi
+          node - <<'NODE'
+          const { auditSanitizedAdminRateInventoryOutDir } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
+
+          const files = auditSanitizedAdminRateInventoryOutDir('out')
+            .filter((file) => /rate_inventory_snapshot_sync_.*\.json$/.test(file));
+          if (files.length === 0) throw new Error('No rate inventory snapshot sync artifacts found');
+          console.log(`sanitized snapshot output audit ok: ${files.join(', ')}`);
+          NODE
+
+      - name: Publish latest snapshot to odin-data branch
+        if: ${{ success() && inputs.publish_enabled }}
+        env:
+          RATE_INVENTORY_SYNC_ENABLED: "1"
+          RATE_INVENTORY_TENANT: ${{ inputs.tenant }}
+          RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json"
+          RATE_INVENTORY_DAYS: ${{ inputs.days }}
+          RATE_INVENTORY_MAX_DAYS: "92"
+          RATE_INVENTORY_MAX_ITEMS: "5000"
+          RATE_INVENTORY_OUT_DIR: "out"
+          RATE_INVENTORY_LANG: "zh_TW"
+          RATE_INVENTORY_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+          RATE_INVENTORY_PUBLISH_ENABLED: ${{ inputs.publish_enabled }}
+          RATE_INVENTORY_DATA_BRANCH: "odin-data"
+          RATE_INVENTORY_LATEST_DIR: "data/odin/rate_inventory/latest"
+          RATE_INVENTORY_TENANT_ALLOWLIST: "goodday"
+          RATE_INVENTORY_MAX_TENANTS_PER_RUN: "1"
+        run: |
+          if [ -n "${{ inputs.today }}" ]; then
+            export RATE_INVENTORY_TODAY="${{ inputs.today }}"
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { sanitizeAdminRateInventorySnapshot, auditSanitizedAdminRateInventorySnapshot } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
+          const { loadEnabledTenantConfig } = require('./lib/adminRateInventorySnapshot/loadRateInventorySnapshotConfig');
+          const { assertRateInventorySnapshotPublishable } = require('./lib/adminRateInventorySnapshot/validateRateInventorySnapshot');
+
+          const config = loadEnabledTenantConfig(process.env);
+          const files = fs.readdirSync(config.outDir)
+            .filter((file) => /^rate_inventory_snapshot_sync_.*\.json$/.test(file))
+            .map((file) => path.join(config.outDir, file))
+            .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+          if (files.length === 0) throw new Error('No rate inventory snapshot sync artifact found');
+
+          const snapshot = sanitizeAdminRateInventorySnapshot(JSON.parse(fs.readFileSync(files[0], 'utf8')));
+          auditSanitizedAdminRateInventorySnapshot(snapshot);
+          assertRateInventorySnapshotPublishable(snapshot, config);
+          if (snapshot.published !== true) throw new Error('Snapshot artifact was not marked published by sync runtime');
+
+          fs.mkdirSync('/tmp/rate-inventory-publish', { recursive: true });
+          fs.writeFileSync('/tmp/rate-inventory-publish/rate_inventory_goodday.json', `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+          console.log(`validated publish candidate from ${files[0]}`);
+          NODE
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${RATE_INVENTORY_DATA_BRANCH}"
+          rm -rf .rate_inventory_data_branch
+          git worktree add -B "${RATE_INVENTORY_DATA_BRANCH}" .rate_inventory_data_branch "origin/${RATE_INVENTORY_DATA_BRANCH}"
+          mkdir -p ".rate_inventory_data_branch/${RATE_INVENTORY_LATEST_DIR}"
+          cp /tmp/rate-inventory-publish/rate_inventory_goodday.json ".rate_inventory_data_branch/${RATE_INVENTORY_LATEST_DIR}/rate_inventory_goodday.json"
+          git -C .rate_inventory_data_branch add "${RATE_INVENTORY_LATEST_DIR}/rate_inventory_goodday.json"
+          if git -C .rate_inventory_data_branch diff --cached --quiet; then
+            echo "No latest snapshot changes to publish."
+            exit 0
+          fi
+          git -C .rate_inventory_data_branch commit -m "Update goodday rate inventory snapshot"
+          git -C .rate_inventory_data_branch push origin "HEAD:${RATE_INVENTORY_DATA_BRANCH}"
+
+      - name: Upload Rate Inventory Snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rate-inventory-snapshot-${{ inputs.tenant }}-${{ github.run_id }}
+          path: |
+            out/rate_inventory_snapshot_sync_*.json
+            !out/*raw*
+            !out/*headers*
+            !out/*trace*
+            !out/*screenshot*
+            !out/*storageState*
+            !out/*cookie*
+            !out/*cookies*
+          if-no-files-found: ignore
+          retention-days: 3
