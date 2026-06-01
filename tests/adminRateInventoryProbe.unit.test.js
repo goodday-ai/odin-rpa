@@ -10,6 +10,7 @@ const { safeAdminUrlInfo } = require("../lib/adminRateInventoryProbe/safeAdminUr
 const { detectRateInventoryCandidate } = require("../lib/adminRateInventoryProbe/detectRateInventoryCandidate");
 const { inferRateInventoryApiMode } = require("../lib/adminRateInventoryProbe/inferRateInventoryApiMode");
 const { sanitizeAdminRateProbeOutput, createControlledStopOutput } = require("../lib/adminRateInventoryProbe/sanitizeAdminRateProbeOutput");
+const { auditSanitizedAdminRateProbeOutput } = require("../lib/adminRateInventoryProbe/auditSanitizedAdminRateProbeOutput");
 
 function makeEnv(overrides = {}) {
   return {
@@ -163,4 +164,52 @@ test("controlled stop payload is safe", () => {
   assert.equal(text.includes("token"), false);
   assert.equal(text.includes("bearer"), false);
   assert.equal(text.includes("2026-06&"), false);
+});
+
+
+test("sanitized audit allows safe metadata values", () => {
+  // 中文註解：驗證 workflow audit 不再因 ISO timestamp 或狀態字串內的普通片段誤判為 sensitive value。
+  assert.doesNotThrow(() => auditSanitizedAdminRateProbeOutput({
+    capturedAt: "2026-06-01T03:20:00.000Z",
+    updatedAt: "2026-06-01T03:21:00.000Z",
+    probeStart: "2026-06-01",
+    probeEnd: "2026-08-31",
+    durationMs: 5000,
+    stoppedReason: "capture_window_completed",
+    tenant: "goodday",
+    hotelId: "5720",
+    targetUrlOrigin: "https://www.owlting.com",
+    targetUrlPath: "/booking/admin/rate-inventory",
+    requestUrlOrigin: "https://api.owlting.com",
+    requestUrlPath: "/booking/v2/admin/rate-inventory",
+    method: "GET",
+    status: 200,
+    contentType: "application/json",
+    summary: {},
+    decision: { apiMode: "month_api", confidence: "high", reason: "month_api candidate selected", reasons: ["date coverage passed"] },
+  }));
+});
+
+test("sanitized audit rejects sensitive keys and value patterns", () => {
+  // 中文註解：value 僅阻擋明確敏感型態；key/queryKeys/path 仍保留嚴格阻擋。
+  const cases = [
+    [{ authorization: "redacted" }, /banned key/],
+    [{ cookie: "redacted" }, /banned key/],
+    [{ nested: { tokenValue: "redacted" } }, /banned key/],
+    [{ nested: { rawBody: "redacted" } }, /banned key/],
+    [{ nested: { headers: {} } }, /banned key/],
+    [{ requestQueryKeys: ["authorization"] }, /banned path\/key value/],
+    [{ diagnostics: { apiLikePathSamples: [{ path: "/booking/v2/admin/customer" }] } }, /banned path\/key value/],
+    [{ safe: "Bearer abc.def-ghi" }, /sensitive value/],
+    [{ safe: "authorization: Bearer abc" }, /sensitive value/],
+    [{ safe: "cookie: sid=abc" }, /sensitive value/],
+    [{ safe: "user@example.com" }, /sensitive value/],
+    [{ safe: "0912345678" }, /sensitive value/],
+    [{ safe: "+886912345678" }, /sensitive value/],
+    [{ safe: "Host: example.com\nAccept: application/json" }, /sensitive value/],
+  ];
+
+  for (const [payload, message] of cases) {
+    assert.throws(() => auditSanitizedAdminRateProbeOutput(payload), message);
+  }
 });
