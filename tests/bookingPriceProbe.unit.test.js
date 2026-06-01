@@ -13,6 +13,12 @@ const { extractPriceOffers } = require("../lib/bookingPriceProbe/extractPriceOff
 const { summarizeJsonShape } = require("../lib/bookingPriceProbe/summarizeJsonShape");
 const { sanitizeProbeOutput, createControlledStopOutput } = require("../lib/bookingPriceProbe/sanitizeProbeOutput");
 const { classifyStopReason, outputExitCode } = require("../lib/bookingPriceProbe/runBookingPriceProbe");
+const { createNetworkDiagnostics } = require("../lib/bookingPriceProbe/networkDiagnostics");
+
+
+function sampleDiagnostics() {
+  return createNetworkDiagnostics({ allowlistOrigins: ["https://www.booking-owlnest.com"] });
+}
 
 function validConfig(overrides = {}) {
   return {
@@ -181,4 +187,120 @@ test("controlled stop returns safe ok=false payload", () => {
   assert.equal(JSON.stringify(payload).includes("secret"), false);
   assert.equal(outputExitCode("remote_429"), 0);
   assert.equal(outputExitCode("invalid_config"), 1);
+});
+
+
+test("diagnostics records origin summary without query values", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search?start=2026-06-02&adult=1", status: 200, contentType: "application/json", skipReason: "" });
+  diagnostics.recordResponse({ url: "https://api.example.com/v1/availability?secret=value", status: 200, contentType: "application/json", skipReason: "origin_not_allowed" });
+  const output = diagnostics.toJSON();
+  assert.deepEqual(output.originSummary[0], { origin: "https://api.example.com", count: 1, allowed: false });
+  assert.equal(JSON.stringify(output).includes("2026-06-02"), false);
+  assert.equal(JSON.stringify(output).includes("value"), false);
+});
+
+test("diagnostics records content-type summary normalized to media type", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search", status: 200, contentType: "application/json; charset=utf-8", skipReason: "" });
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/page", status: 200, contentType: "text/html; charset=utf-8", skipReason: "non_json" });
+  const output = diagnostics.toJSON();
+  assert.deepEqual(output.contentTypeSummary, [
+    { contentType: "application/json", count: 1 },
+    { contentType: "text/html", count: 1 },
+  ]);
+});
+
+test("diagnostics records status summary", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search", status: 200, contentType: "application/json", skipReason: "" });
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search", status: 404, contentType: "text/html", skipReason: "non_200" });
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search", status: 404, contentType: "text/html", skipReason: "non_200" });
+  assert.deepEqual(diagnostics.toJSON().statusSummary, [{ status: 404, count: 2 }, { status: 200, count: 1 }]);
+});
+
+test("diagnostics records blocked origin samples safely", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://api.example.com/v1/availability?start=2026-06-02&end=2026-06-03&adult=1", status: 200, contentType: "application/json; charset=utf-8", skipReason: "origin_not_allowed" });
+  const sample = diagnostics.toJSON().blockedOriginSamples[0];
+  assert.deepEqual(sample, {
+    origin: "https://api.example.com",
+    path: "/v1/availability",
+    queryKeys: ["adult", "end", "start"],
+    status: 200,
+    contentType: "application/json",
+  });
+  assert.equal(JSON.stringify(sample).includes("2026-06-02"), false);
+});
+
+test("diagnostics records non-json samples safely", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/assets/app.js", status: 200, contentType: "application/javascript", skipReason: "non_json" });
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search?start=2026-06-02&end=2026-06-03", status: 200, contentType: "text/plain; charset=utf-8", skipReason: "non_json" });
+  const output = diagnostics.toJSON();
+  assert.equal(output.nonJsonSamples[0].path, "/api/search");
+  assert.deepEqual(output.nonJsonSamples[0].queryKeys, ["end", "start"]);
+  assert.equal(output.nonJsonSamples[0].contentType, "text/plain");
+  assert.equal(JSON.stringify(output).includes("2026-06-02"), false);
+});
+
+test("diagnostics records api-like path samples safely", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://api.example.com/api/search?start=2026-06-02&adult=1", status: 200, contentType: "application/json", skipReason: "origin_not_allowed" });
+  const sample = diagnostics.toJSON().apiLikePathSamples[0];
+  assert.deepEqual(sample, {
+    origin: "https://api.example.com",
+    path: "/api/search",
+    queryKeys: ["adult", "start"],
+    status: 200,
+    contentType: "application/json",
+    allowed: false,
+    skipReason: "origin_not_allowed",
+  });
+  assert.equal(JSON.stringify(sample).includes("2026-06-02"), false);
+});
+
+test("diagnostics suppresses sensitive query keys", () => {
+  const diagnostics = sampleDiagnostics();
+  diagnostics.recordResponse({ url: "https://www.booking-owlnest.com/api/search?start=2026-06-02&token=secret&email=guest@example.com&phone=0912345678&uuid=abc&order=123", status: 200, contentType: "application/json", skipReason: "" });
+  const output = diagnostics.toJSON();
+  assert.deepEqual(output.apiLikePathSamples[0].queryKeys, ["start"]);
+  const serialized = JSON.stringify(output);
+  assert.equal(serialized.includes("token"), false);
+  assert.equal(serialized.includes("email"), false);
+  assert.equal(serialized.includes("phone"), false);
+  assert.equal(serialized.includes("uuid"), false);
+  assert.equal(serialized.includes("\"order\""), false);
+  assert.equal(serialized.includes("secret"), false);
+  assert.equal(serialized.includes("guest@example.com"), false);
+});
+
+test("sanitizeProbeOutput removes sensitive diagnostics fields", () => {
+  const output = sanitizeProbeOutput({
+    diagnostics: {
+      headers: { cookie: "a=b", authorization: "Bearer abc" },
+      rawBody: "secret body",
+      apiLikePathSamples: [{
+        origin: "https://www.booking-owlnest.com",
+        path: "/api/search",
+        queryKeys: ["start", "token", "email", "phone", "order", "uuid"],
+        status: 200,
+        contentType: "application/json",
+        body: "raw body",
+      }],
+    },
+  });
+  const serialized = JSON.stringify(output);
+  assert.equal(serialized.includes("headers"), false);
+  assert.equal(serialized.includes("rawBody"), false);
+  assert.equal(serialized.includes("body"), false);
+  assert.equal(serialized.includes("cookie"), false);
+  assert.equal(serialized.includes("authorization"), false);
+  assert.equal(serialized.includes("Bearer"), false);
+  assert.equal(serialized.includes("token"), false);
+  assert.equal(serialized.includes("email"), false);
+  assert.equal(serialized.includes("phone"), false);
+  assert.equal(serialized.includes("\"order\""), false);
+  assert.equal(serialized.includes("uuid"), false);
+  assert.deepEqual(output.diagnostics.apiLikePathSamples[0].queryKeys, ["start"]);
 });
