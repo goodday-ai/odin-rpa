@@ -150,6 +150,90 @@ test("normalizer extracts Owlting room/date/numeric plan shape", () => {
   assert.equal(normalized.summary.truncated, false);
 });
 
+
+test("normalizer merges data[].stocks into plans[].plan_items by room_id and date", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [
+      {
+        room_id: 57201,
+        room_name: "2F 包層",
+        stocks: [
+          { date: "2026-06-01", count: 2, max_stock_count: 5, is_lock: false },
+          { date: "2026-06-02", count: 3, max_stock_count: 5, is_lock: true },
+          { date: "2026-06-04", count: 1, max_stock_count: 5, is_lock: false },
+        ],
+        plans: [
+          {
+            plan_id: 42144,
+            plan_name: "Booking",
+            plan_items: [
+              { date: "2026-06-01", price: 24000, currency: "TWD", is_allow_booking: true },
+              { date: "2026-06-02", price: 25000, currency: "TWD", is_allow_booking: true },
+              { date: "2026-06-03", price: 26000, currency: "TWD", is_allow_booking: true },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.items.length, 3);
+
+  const open = normalized.items.find((item) => item.date === "2026-06-01");
+  assert.equal(open.salesUnitId, "57201");
+  assert.equal(open.salesUnitName, "2F 包層");
+  assert.equal(open.planName, "Booking");
+  assert.equal(open.price, 24000);
+  assert.equal(open.currency, "TWD");
+  assert.equal(open.inventory, 2);
+  assert.equal(open.maxInventory, 5);
+  assert.equal(open.available, true);
+
+  const locked = normalized.items.find((item) => item.date === "2026-06-02");
+  assert.equal(locked.inventory, 3);
+  assert.equal(locked.maxInventory, 5);
+  assert.equal(locked.available, false);
+
+  const missingStock = normalized.items.find((item) => item.date === "2026-06-03");
+  assert.equal(missingStock.inventory, null);
+  assert.equal(missingStock.maxInventory, null);
+  assert.equal(missingStock.available, null);
+
+  assert.equal(normalized.summary.availableItemCount, 1);
+  assert.equal(normalized.summary.zeroInventoryItemCount, 0);
+  assert.equal(normalized.summary.closedItemCount, 1);
+  assert.equal(normalized.summary.unknownInventoryItemCount, 1);
+  assert.equal(normalized.warnings.some((warning) => warning.reason === "date context exists but no price plans" && warning.sourcePath.includes(".stocks")), false);
+  assert.equal(normalized.warnings.some((warning) => warning.reason === "plan item exists but no matching stock for same room/date"), true);
+  assert.equal(normalized.warnings.some((warning) => warning.reason === "stock exists but no matching plan item for same room/date"), true);
+});
+
+test("normalizer counts zero inventory and unknown inventory without defaulting missing stock to 0", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [
+      {
+        room_id: "room-a",
+        room_name: "A",
+        stocks: [{ date: "2026-06-01", count: 0, max_stock_count: 2, is_lock: false }],
+        plans: [{ plan_name: "Direct", plan_items: [{ date: "2026-06-01", price: 1000, currency: "TWD", is_allow_booking: true }, { date: "2026-06-02", price: 1200, currency: "TWD", is_allow_booking: false }] }],
+      },
+    ],
+  });
+
+  const zeroStock = normalized.items.find((item) => item.date === "2026-06-01");
+  const missingClosed = normalized.items.find((item) => item.date === "2026-06-02");
+
+  assert.equal(zeroStock.inventory, 0);
+  assert.equal(zeroStock.available, false);
+  assert.equal(missingClosed.inventory, null);
+  assert.equal(missingClosed.available, false);
+  assert.equal(normalized.summary.availableItemCount, 0);
+  assert.equal(normalized.summary.zeroInventoryItemCount, 1);
+  assert.equal(normalized.summary.closedItemCount, 2);
+  assert.equal(normalized.summary.unknownInventoryItemCount, 1);
+});
+
 test("normalizer limits items to 500 and sets truncated=true", () => {
   const calendar = Array.from({ length: 501 }, (_, index) => ({
     date: `2026-06-${String((index % 28) + 1).padStart(2, "0")}`,
@@ -264,5 +348,6 @@ test("controlled stop payload is safe", () => {
   assert.equal(snapshot.ok, false);
   assert.equal(snapshot.stoppedReason, "remote_403");
   assert.equal(snapshot.hotelId, "5720");
+  assert.equal(snapshot.summary.unknownInventoryItemCount, 0);
   assert.doesNotThrow(() => auditSanitizedAdminRateInventorySnapshot(snapshot));
 });
