@@ -22,7 +22,11 @@ const {
 const { publishRateInventorySnapshot, latestSnapshotPath, publishCandidatePath } = require("../lib/adminRateInventorySnapshot/publishRateInventorySnapshot");
 const { buildSnapshotCalendarsRequest } = require("../lib/adminRateInventorySnapshot/runRateInventorySnapshotSync");
 const { runRateInventorySnapshotBatchSync } = require("../lib/adminRateInventorySnapshot/runRateInventorySnapshotBatchSync");
-const { validateRateInventorySnapshotForPublish } = require("../lib/adminRateInventorySnapshot/validateRateInventorySnapshot");
+const {
+  assertRateInventorySnapshotPublishCandidate,
+  validateRateInventorySnapshotForPublish,
+  validateRateInventorySnapshotPublishCandidate,
+} = require("../lib/adminRateInventorySnapshot/validateRateInventorySnapshot");
 
 function baseEnv(extra = {}) {
   return {
@@ -233,6 +237,55 @@ test("rejects stale / invalid range", () => {
   assert.match(errors.join("\n"), /rangeStart\/rangeEnd must match current sync window/);
 });
 
+test("publish candidate root snapshot without published=true is accepted", () => {
+  const config = sampleConfig();
+  const snapshot = sampleSnapshot(config);
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot, "published"), false);
+  assert.deepEqual(validateRateInventorySnapshotPublishCandidate(snapshot), []);
+  assert.equal(assertRateInventorySnapshotPublishCandidate(snapshot), true);
+});
+
+test("publish candidate with version=rate_inventory_snapshot_v1 and ok=true is accepted", () => {
+  const config = sampleConfig();
+  const snapshot = { ...sampleSnapshot(config), version: "rate_inventory_snapshot_v1", ok: true };
+  assert.deepEqual(validateRateInventorySnapshotPublishCandidate(snapshot), []);
+});
+
+test("publish candidate artifact wrapper without snapshot root is rejected", () => {
+  const config = sampleConfig();
+  const wrapper = {
+    published: true,
+    latestPath: "data/odin/rate_inventory/latest/rate_inventory_goodday.json",
+    dataBranch: "odin-data",
+    snapshot: sampleSnapshot(config),
+  };
+  const errors = validateRateInventorySnapshotPublishCandidate(wrapper);
+  assert.match(errors.join("\n"), /version must be rate_inventory_snapshot_v1/);
+  assert.match(errors.join("\n"), /ok must be true/);
+  assert.match(errors.join("\n"), /items must not be empty/);
+});
+
+test("publish candidate with summary.truncated=true is rejected", () => {
+  const config = sampleConfig();
+  const snapshot = { ...sampleSnapshot(config), summary: { ...sampleSnapshot(config).summary, truncated: true } };
+  const errors = validateRateInventorySnapshotPublishCandidate(snapshot);
+  assert.match(errors.join("\n"), /summary\.truncated must not be true/);
+});
+
+test("publish candidate with empty items is rejected", () => {
+  const config = sampleConfig();
+  const snapshot = { ...sampleSnapshot(config), items: [], summary: { ...sampleSnapshot(config).summary, itemCount: 0 } };
+  const errors = validateRateInventorySnapshotPublishCandidate(snapshot);
+  assert.match(errors.join("\n"), /items must not be empty/);
+});
+
+test("publish candidate with wrong version is rejected", () => {
+  const config = sampleConfig();
+  const snapshot = { ...sampleSnapshot(config), version: "artifact_wrapper_v1" };
+  const errors = validateRateInventorySnapshotPublishCandidate(snapshot);
+  assert.match(errors.join("\n"), /version must be rate_inventory_snapshot_v1/);
+});
+
 test("publishes valid snapshot to safe candidate path", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-publish-"));
   const latestDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-latest-"));
@@ -244,6 +297,10 @@ test("publishes valid snapshot to safe candidate path", async () => {
   assert.equal(result.candidatePath, path.join(tmpDir, "rate_inventory_goodday.json"));
   assert.equal(fs.existsSync(result.latestPath), false);
   const written = JSON.parse(fs.readFileSync(result.candidatePath, "utf8"));
+  assert.equal(written.version, "rate_inventory_snapshot_v1");
+  assert.equal(written.ok, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(written, "published"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(written, "snapshot"), false);
   assert.equal(written.tenant, "goodday");
   assert.equal(written.summary.truncated, false);
   assert.deepEqual([...new Set(written.items.map((item) => item.salesUnitId))], ["26669"]);
