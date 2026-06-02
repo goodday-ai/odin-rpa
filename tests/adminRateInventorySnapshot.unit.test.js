@@ -119,36 +119,51 @@ test("rejects tenant days greater than maxDays during config validation", () => 
   assert.match(validateRateInventorySnapshotConfig(config).join("\n"), /RATE_INVENTORY_DAYS must be <= RATE_INVENTORY_MAX_DAYS/);
 });
 
-test("multi-brand tenant inventory config keeps non-goodday disabled with empty allowlists", () => {
+test("multi-brand tenant inventory config enables selected publish allowlists", () => {
   const tenants = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config", "rateInventoryTenants.json"), "utf8"));
-  const disabledTenants = ["mozhouse", "houseapt", "houseresidence", "lunarhaven", "nightph", "sunmoon", "triplesuite"];
-  assert.equal(tenants.goodday.enabled, true);
-  assert.equal(tenants.goodday.days, 120);
-  for (const tenantKey of disabledTenants) {
-    assert.equal(tenants[tenantKey].enabled, false, `${tenantKey} must remain disabled`);
+  const expected = {
+    goodday: { plans: ["42144", "42145", "42166"], salesUnits: ["26669"] },
+    mozhouse: { plans: ["29021", "30102", "42263"], salesUnits: ["27443", "27444", "27475"] },
+    houseapt: { plans: ["34646", "40119"], salesUnits: ["30637", "30717"] },
+    houseresidence: { plans: ["40071", "43777"], salesUnits: ["32440"] },
+    lunarhaven: { plans: ["40073", "40684"], salesUnits: ["32438"] },
+    nightph: { plans: ["35157"], salesUnits: ["31168"] },
+    sunmoon: { plans: ["37738", "42691", "44175"], salesUnits: ["32439"] },
+    triplesuite: { plans: ["41445"], salesUnits: ["30274"] },
+  };
+
+  for (const [tenantKey, allowlists] of Object.entries(expected)) {
+    assert.equal(tenants[tenantKey].enabled, true, `${tenantKey} must be enabled`);
     assert.equal(tenants[tenantKey].days, 120, `${tenantKey} must keep 120-day inventory horizon`);
-    assert.deepEqual(tenants[tenantKey].publishPlanIdAllowlist, [], `${tenantKey} plan allowlist must stay empty`);
-    assert.deepEqual(tenants[tenantKey].publishSalesUnitIdAllowlist, [], `${tenantKey} sales-unit allowlist must stay empty`);
+    assert.deepEqual(tenants[tenantKey].publishPlanIdAllowlist, allowlists.plans, `${tenantKey} plan allowlist must match approved dry-run planIds`);
+    assert.deepEqual(tenants[tenantKey].publishSalesUnitIdAllowlist, allowlists.salesUnits, `${tenantKey} sales-unit allowlist must match approved dry-run salesUnitIds`);
   }
 });
 
-test("disabled tenant with empty allowlists loads as inventory config but is not syncable or publishable", () => {
-  const config = loadRateInventorySnapshotConfig(baseEnv({
+test("all enabled tenant configs have non-empty publish allowlists and 120-day horizon", () => {
+  const tenants = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config", "rateInventoryTenants.json"), "utf8"));
+  const enabledTenants = Object.values(tenants).filter((tenant) => tenant.enabled);
+
+  assert.equal(enabledTenants.length, Object.keys(tenants).length);
+  for (const tenant of enabledTenants) {
+    assert.equal(tenant.days, 120, `${tenant.tenant} must use 120 days`);
+    assert.ok(tenant.publishPlanIdAllowlist.length > 0, `${tenant.tenant} must have publishPlanIdAllowlist`);
+    assert.ok(tenant.publishSalesUnitIdAllowlist.length > 0, `${tenant.tenant} must have publishSalesUnitIdAllowlist`);
+  }
+});
+
+test("newly enabled mozhouse tenant loads as syncable with approved allowlists", () => {
+  const config = loadEnabledTenantConfig(baseEnv({
     RATE_INVENTORY_TENANT: "mozhouse",
     RATE_INVENTORY_TENANT_ALLOWLIST: "mozhouse",
     RATE_INVENTORY_PUBLISH_ENABLED: "1",
   }));
+
+  assert.equal(config.enabled, true);
   assert.equal(config.tenant, "mozhouse");
   assert.equal(config.days, 120);
-  assert.deepEqual(config.publishPlanIdAllowlist, []);
-  assert.deepEqual(config.publishSalesUnitIdAllowlist, []);
-  assert.throws(
-    () => loadEnabledTenantConfig(baseEnv({ RATE_INVENTORY_TENANT: "mozhouse", RATE_INVENTORY_TENANT_ALLOWLIST: "mozhouse" })),
-    /rate inventory tenant disabled: mozhouse/,
-  );
-  const snapshot = sampleSnapshot(config);
-  assert.equal(snapshot.items.length, 0);
-  assert.match(validateRateInventorySnapshotForPublish(snapshot, config).join("\n"), /items must not be empty|publishPlanIdAllowlist is required|publishSalesUnitIdAllowlist is required/);
+  assert.deepEqual(config.publishPlanIdAllowlist, ["29021", "30102", "42263"]);
+  assert.deepEqual(config.publishSalesUnitIdAllowlist, ["27443", "27444", "27475"]);
 });
 
 test("rejects disabled tenant", () => {

@@ -11,80 +11,80 @@
     "notes": "只 publish 官網對客可顯示專案；Booking / Booking 3F 暫不 publish"
   },
   "mozhouse": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "mozhouse",
     "hotelId": "5816",
     "displayName": "木子寓所",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["29021", "30102", "42263"],
+    "publishSalesUnitIdAllowlist": ["27443", "27444", "27475"],
+    "notes": "publish 官網訂房專案、官網訂房專案 - 2人入住、官網訂房專案 - 4人入住；OTA串接專案不 publish"
   },
   "houseapt": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "houseapt",
     "hotelId": "6405",
     "displayName": "好思公寓",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["34646", "40119"],
+    "publishSalesUnitIdAllowlist": ["30637", "30717"],
+    "notes": "publish 官網專案與限量優惠連住專案；Booking、OTA售價、Trip、EZ、Klook、同業訂房不 publish"
   },
   "houseresidence": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "houseresidence",
     "hotelId": "6723",
     "displayName": "好思寓所",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["40071", "43777"],
+    "publishSalesUnitIdAllowlist": ["32440"],
+    "notes": "publish 官網專屬優惠與官網專屬不可取消優惠；暫停官網專案、同業訂房、綠的專案、OTA 與官網原始價格不 publish"
   },
   "lunarhaven": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "lunarhaven",
     "hotelId": "6721",
     "displayName": "泊月民宿",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["40073", "40684"],
+    "publishSalesUnitIdAllowlist": ["32438"],
+    "notes": "publish 官網專屬優惠與官網專屬連住優惠；管家專用、OTA 與官網原始價格、同業訂房不 publish"
   },
   "nightph": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "nightph",
     "hotelId": "6454",
     "displayName": "伊莉莎白甜夜",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["35157"],
+    "publishSalesUnitIdAllowlist": ["31168"],
+    "notes": "只 publish 包棟 salesUnitId=31168 的官網專案；雙人房、四人房、Booking、Trip.com 不 publish"
   },
   "sunmoon": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "sunmoon",
     "hotelId": "6722",
     "displayName": "桑沐民宿",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["37738", "42691", "44175"],
+    "publishSalesUnitIdAllowlist": ["32439"],
+    "notes": "只 publish 包棟 salesUnitId=32439 的官網專案、14人包棟花火節連住限定專案、8人包棟花火節連住限定專案；高級四人房與 OTA / Trip 不 publish"
   },
   "triplesuite": {
-    "enabled": false,
+    "enabled": true,
     "tenant": "triplesuite",
     "hotelId": "6323",
     "displayName": "弎居胡同",
     "days": 120,
     "currency": "TWD",
-    "publishPlanIdAllowlist": [],
-    "publishSalesUnitIdAllowlist": [],
-    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+    "publishPlanIdAllowlist": ["41445"],
+    "publishSalesUnitIdAllowlist": ["30274"],
+    "notes": "publish salesUnitId=30274 的官網專屬優惠；OTA專屬包棟、OTA與官網原始價格不 publish。若需早鳥優惠，後續再加入 planId 40667"
   }
 }
