@@ -5,6 +5,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { buildCalendarsApiRequest } = require("../lib/adminRateInventoryFetcher/buildCalendarsApiRequest");
 const { normalizeCalendarsRateInventory } = require("../lib/adminRateInventoryFetcher/normalizeCalendarsRateInventory");
 const {
@@ -12,6 +15,7 @@ const {
   createControlledStopSnapshot,
   auditSanitizedAdminRateInventorySnapshot,
 } = require("../lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot");
+const { runAdminRateInventoryFetcherDryRun } = require("../lib/adminRateInventoryFetcher/runAdminRateInventoryFetcherDryRun");
 
 test("buildCalendarsApiRequest builds safe range API URL", () => {
   const request = buildCalendarsApiRequest({
@@ -39,8 +43,46 @@ test("buildCalendarsApiRequest rejects start >= end", () => {
   assert.throws(() => buildCalendarsApiRequest({ origin: "https://www.owlting.com", hotelId: "5720", start: "2026-06-03", end: "2026-06-02" }), /start must be before end/);
 });
 
-test("buildCalendarsApiRequest rejects range > 92 days", () => {
+test("buildCalendarsApiRequest default maxDays remains 92", () => {
   assert.throws(() => buildCalendarsApiRequest({ origin: "https://www.owlting.com", hotelId: "5720", start: "2026-06-01", end: "2026-09-02" }), /range must be <= 92 days/);
+});
+
+test("buildCalendarsApiRequest accepts maxDays=120", () => {
+  const request = buildCalendarsApiRequest({
+    origin: "https://www.owlting.com",
+    hotelId: "5720",
+    start: "2026-06-01",
+    end: "2026-09-29",
+    maxDays: 120,
+  });
+  assert.match(request.url, /during_end_date=2026-09-29/);
+});
+
+test("buildCalendarsApiRequest rejects 121 when maxDays=120", () => {
+  assert.throws(
+    () => buildCalendarsApiRequest({ origin: "https://www.owlting.com", hotelId: "5720", start: "2026-06-01", end: "2026-09-30", maxDays: 120 }),
+    /range must be <= 120 days/,
+  );
+});
+
+test("dry-run behavior remains backward compatible with 92-day default", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-fetcher-dryrun-"));
+  const result = await runAdminRateInventoryFetcherDryRun({
+    chromium: {},
+    env: {
+      ADMIN_RATE_FETCHER_ENABLED: "1",
+      ADMIN_RATE_FETCHER_TENANT: "goodday",
+      ADMIN_RATE_FETCHER_HOTEL_ID: "5720",
+      ADMIN_RATE_FETCHER_START: "2026-06-01",
+      ADMIN_RATE_FETCHER_END: "2026-09-02",
+      ADMIN_RATE_FETCHER_OUT_DIR: tmpDir,
+    },
+  });
+
+  assert.equal(result.stoppedReason, "invalid_config");
+  assert.equal(result.exitCode, 1);
+  const output = JSON.parse(fs.readFileSync(result.outputPath, "utf8"));
+  assert.match(JSON.stringify(output), /range must be <= 92 days/);
 });
 
 test("normalizer extracts date/price/inventory/name from nested calendar-like payload", () => {

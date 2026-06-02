@@ -20,6 +20,7 @@ const {
   validateRateInventorySnapshotConfig,
 } = require("../lib/adminRateInventorySnapshot/loadRateInventorySnapshotConfig");
 const { publishRateInventorySnapshot, latestSnapshotPath } = require("../lib/adminRateInventorySnapshot/publishRateInventorySnapshot");
+const { buildSnapshotCalendarsRequest } = require("../lib/adminRateInventorySnapshot/runRateInventorySnapshotSync");
 const { validateRateInventorySnapshotForPublish } = require("../lib/adminRateInventorySnapshot/validateRateInventorySnapshot");
 
 function baseEnv(extra = {}) {
@@ -86,6 +87,22 @@ test("accepts goodday 120-day sync window and maxDays", () => {
   assert.equal(config.maxDays, 120);
   assert.equal(config.start, "2026-06-01");
   assert.equal(config.end, "2026-09-28");
+});
+
+test("snapshot sync passes config.maxDays=120 to buildCalendarsApiRequest", () => {
+  const config = sampleConfig({ RATE_INVENTORY_TODAY: "2026-06-02", RATE_INVENTORY_DAYS: "120", RATE_INVENTORY_MAX_DAYS: "120" });
+  const request = buildSnapshotCalendarsRequest(config);
+
+  assert.equal(config.start, "2026-06-02");
+  assert.equal(config.end, "2026-09-29");
+  assert.match(request.url, /during_start_date=2026-06-02/);
+  assert.match(request.url, /during_end_date=2026-09-29/);
+});
+
+test("goodday days=120 no longer throws range must be <= 92 days", () => {
+  const config = sampleConfig({ RATE_INVENTORY_TODAY: "2026-06-02", RATE_INVENTORY_DAYS: "120", RATE_INVENTORY_MAX_DAYS: "120" });
+
+  assert.doesNotThrow(() => buildSnapshotCalendarsRequest(config));
 });
 
 test("rejects tenant days greater than maxDays during config validation", () => {
