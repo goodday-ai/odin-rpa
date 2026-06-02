@@ -8,7 +8,7 @@
   "rangeEnd": "2026-09-29",
   "currency": "TWD",
   "source": "owlting_admin_calendars",
-  "capturedAt": "2026-06-02T02:46:17.130Z",
+  "capturedAt": "2026-06-02T05:07:19.370Z",
   "publishPolicy": {
     "mode": "plan_id_allowlist",
     "planIds": [
@@ -5070,8 +5070,5 @@
       "cta": false,
       "ctd": false
     }
-  ],
-  "published": true,
-  "latestPath": "data/odin/rate_inventory/latest/rate_inventory_goodday.json",
-  "dataBranch": "odin-data"
+  ]
 }
