@@ -69,6 +69,14 @@ test("rate inventory snapshot sync workflow publish step supports rate_inventory
   assert.match(workflow, /commit -m "Update rate inventory snapshots"/);
 });
 
+
+test("rate inventory snapshot sync workflow publish validation accepts snapshot root without published flag", () => {
+  assert.match(workflow, /assertRateInventorySnapshotPublishCandidate/);
+  assert.match(workflow, /Invalid publish candidate: \${file}:/);
+  assert.doesNotMatch(workflow, /snapshot\.published\s*!==\s*true/);
+  assert.doesNotMatch(workflow, /published\s*===\s*true/);
+});
+
 test("rate inventory snapshot sync change does not modify odin sync workflow", () => {
   // 中文註解：測試只確認既有訂單同步 workflow 存在且本新 workflow 未引用它，避免誤把舊訂單 publish 設定搬進快照驗證流程。
   assert.equal(fs.existsSync(odinSyncPath), true);

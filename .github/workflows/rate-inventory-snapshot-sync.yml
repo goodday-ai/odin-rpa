@@ -128,7 +128,7 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');
-          const { auditSanitizedAdminRateInventorySnapshot } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
+          const { assertRateInventorySnapshotPublishCandidate } = require('./lib/adminRateInventorySnapshot/validateRateInventorySnapshot');
 
           const publishDir = '/tmp/rate-inventory-publish';
           const files = fs.readdirSync(publishDir)
@@ -138,9 +138,10 @@ jobs:
           if (files.length === 0) throw new Error('No rate_inventory_*.json publish candidates found');
           for (const file of files) {
             const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
-            auditSanitizedAdminRateInventorySnapshot(snapshot);
-            if (snapshot.ok !== true || snapshot.published !== true || !snapshot.tenant || snapshot.summary?.truncated !== false || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
-              throw new Error(`Invalid publish candidate: ${file}`);
+            try {
+              assertRateInventorySnapshotPublishCandidate(snapshot);
+            } catch (error) {
+              throw new Error(`Invalid publish candidate: ${file}: ${error.message || error}`);
             }
           }
           console.log(`validated publish candidates: ${files.join(', ')}`);
