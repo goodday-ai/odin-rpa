@@ -251,6 +251,137 @@ test("normalizer merges data[].stocks into plans[].plan_items by room_id and dat
   assert.equal(normalized.warnings.some((warning) => warning.reason === "stock exists but no matching plan item for same room/date"), true);
 });
 
+
+
+test("normalizer preserves planItemId / planItemName when child object has id/name", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [
+      {
+        room_id: "32440",
+        room_name: "二臥室套房",
+        plans: [
+          {
+            plan_id: "40070",
+            plan_name: "OTA 與官網原始價格",
+            plan_items: [
+              { id: "pi-1", name: "官網專屬優惠", date: "2026-06-01", price: 9000, currency: "TWD", inventory: 1, is_allow_booking: true },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.items[0].planId, "40070");
+  assert.equal(normalized.items[0].planName, "OTA 與官網原始價格");
+  assert.equal(normalized.items[0].planItemId, "pi-1");
+  assert.equal(normalized.items[0].planItemName, "官網專屬優惠");
+});
+
+test("normalizer preserves dynamic numeric key as sourcePlanItemKey", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [
+      {
+        room_id: "32440",
+        room_name: "二臥室套房",
+        plans: [
+          {
+            plan_id: "40070",
+            plan_name: "OTA 與官網原始價格",
+            plan_items: {
+              42144: { name: "官網專屬優惠", date: "2026-06-01", price: 18000, currency: "TWD", inventory: 1, is_allow_booking: true },
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.items[0].planId, "40070");
+  assert.equal(normalized.items[0].sourcePlanItemKey, "42144");
+  assert.equal(normalized.items[0].planItemId, "42144");
+  assert.equal(normalized.items[0].planItemName, "官網專屬優惠");
+});
+
+test("items include planItemName", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [{ room_id: "r1", room_name: "Room", plans: [{ plan_id: "p1", plan_name: "Base", plan_items: [{ item_id: "i1", item_name: "早鳥優惠", date: "2026-06-01", price: 1000, currency: "TWD", inventory: 1 }] }] }],
+  });
+
+  assert.equal(normalized.items[0].planItemName, "早鳥優惠");
+  assert.equal(normalized.items[0].planItemId, "i1");
+});
+
+test("uniquePlanItems aggregates by salesUnitId + planId + planItem identity", () => {
+  const uniquePlanItems = buildUniquePlanItems([
+    { salesUnitId: "32440", salesUnitName: "二臥室套房", planId: "40070", planName: "OTA 與官網原始價格", planItemId: "pi-1", planItemName: "官網專屬優惠", date: "2026-06-01", price: 9000, inventory: 1, available: true, currency: "TWD", minLos: 1 },
+    { salesUnitId: "32440", salesUnitName: "二臥室套房", planId: "40070", planName: "OTA 與官網原始價格", planItemId: "pi-1", planItemName: "官網專屬優惠", date: "2026-06-02", price: 12000, inventory: 0, available: false, currency: "TWD", minLos: 2 },
+    { salesUnitId: "32440", salesUnitName: "二臥室套房", planId: "40070", planName: "OTA 與官網原始價格", sourcePlanItemKey: "42145", planItemName: "不可取消優惠", date: "2026-06-01", price: 11000, inventory: null, available: null, currency: "TWD", minLos: 1 },
+  ]);
+
+  assert.equal(uniquePlanItems.length, 2);
+  assert.deepEqual(uniquePlanItems[0], {
+    salesUnitId: "32440",
+    salesUnitName: "二臥室套房",
+    planId: "40070",
+    planName: "OTA 與官網原始價格",
+    planItemId: "pi-1",
+    planItemName: "官網專屬優惠",
+    sourcePlanItemKey: "",
+    currency: "TWD",
+    minPrice: 9000,
+    maxPrice: 12000,
+    dateCount: 2,
+    availableItemCount: 1,
+    zeroInventoryItemCount: 1,
+    unknownInventoryItemCount: 0,
+    minLosValues: [1, 2],
+  });
+});
+
+test("uniquePlans children summarize uniquePlanItems", () => {
+  const uniquePlans = buildUniquePlans([
+    { salesUnitId: "32440", salesUnitName: "二臥室套房", planId: "40070", planName: "OTA 與官網原始價格", planItemId: "pi-1", planItemName: "官網專屬優惠", date: "2026-06-01", price: 9000, inventory: 1, available: true, currency: "TWD", minLos: 1 },
+    { salesUnitId: "32440", salesUnitName: "二臥室套房", planId: "40070", planName: "OTA 與官網原始價格", planItemId: "pi-2", planItemName: "不可取消優惠", date: "2026-06-01", price: 11000, inventory: 1, available: true, currency: "TWD", minLos: 1 },
+  ]);
+
+  assert.equal(uniquePlans.length, 1);
+  assert.equal(uniquePlans[0].children.length, 2);
+  assert.deepEqual(uniquePlans[0].children.map((child) => child.planItemName), ["官網專屬優惠", "不可取消優惠"]);
+  assert.equal(uniquePlans[0].children[0].minPrice, 9000);
+  assert.equal(uniquePlans[0].children[0].dateCount, 1);
+});
+
+test("sanitizer keeps safe planItemName but removes sensitive values", () => {
+  const sanitized = sanitizeAdminRateInventorySnapshot({
+    items: [
+      { planItemName: "官網專屬優惠", token: "Bearer abc", headers: { authorization: "Bearer abc" } },
+      { planItemName: "guest@example.com" },
+    ],
+  });
+
+  assert.equal(sanitized.items[0].planItemName, "官網專屬優惠");
+  assert.equal(sanitized.items[1].planItemName, "");
+  assert.equal(JSON.stringify(sanitized).includes("Bearer"), false);
+  assert.equal(JSON.stringify(sanitized).includes("headers"), false);
+});
+
+test("backward compatibility: payload without subplan still works", () => {
+  const normalized = normalizeCalendarsRateInventory({
+    data: [{ room_id: "r1", room_name: "Room", plans: [{ plan_id: "p1", plan_name: "Direct", calendars: [{ date: "2026-06-01", price: 1000, currency: "TWD", inventory: 1 }] }] }],
+  });
+  const uniquePlans = buildUniquePlans(normalized.items);
+  const uniquePlanItems = buildUniquePlanItems(normalized.items);
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.items[0].planItemName, "");
+  assert.equal(uniquePlans.length, 1);
+  assert.deepEqual(uniquePlans[0].children, []);
+  assert.deepEqual(uniquePlanItems, []);
+});
+
 test("normalizer counts zero inventory and unknown inventory without defaulting missing stock to 0", () => {
   const normalized = normalizeCalendarsRateInventory({
     data: [
@@ -396,7 +527,7 @@ test("controlled stop payload is safe", () => {
 
 const { loadAdminRateFetcherConfig, validateAdminRateFetcherConfig } = require("../lib/adminRateInventoryFetcher/loadAdminRateFetcherConfig");
 const { runAdminRateInventoryBatchDryRun } = require("../lib/adminRateInventoryFetcher/runAdminRateInventoryBatchDryRun");
-const { buildUniquePlans } = require("../lib/adminRateInventoryFetcher/summarizeAdminRateInventoryUniquePlans");
+const { buildUniquePlanItems, buildUniquePlans } = require("../lib/adminRateInventoryFetcher/summarizeAdminRateInventoryUniquePlans");
 
 function writeTenantConfig(tenants) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-tenants-"));
@@ -532,6 +663,8 @@ test("ALL mode sequentially aggregates batch summary", async () => {
   assert.equal(result.output.mode, "ALL");
   assert.equal(result.output.tenantCount, 3);
   assert.equal(result.output.ok, false);
+  assert.equal(result.output.results[0].uniquePlanCount, 0);
+  assert.equal(result.output.results[0].uniquePlanItemCount, 0);
   assert.equal(result.exitCode, 0);
 });
 
@@ -540,11 +673,13 @@ test("ALL mode produces per-tenant results", async () => {
   const result = await runAdminRateInventoryBatchDryRun({
     chromium: {},
     env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "ALL", ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: "2", ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "0", ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }),
-    dryRunRunner: async ({ env }) => ({ stoppedReason: "completed", outputPath: `out/${env.ADMIN_RATE_FETCHER_TENANT}.json`, output: { ok: true, summary: { dateCount: 120 } } }),
+    dryRunRunner: async ({ env }) => ({ stoppedReason: "completed", outputPath: `out/${env.ADMIN_RATE_FETCHER_TENANT}.json`, output: { ok: true, summary: { dateCount: 120 }, uniquePlans: [{ planId: "p1" }], uniquePlanItems: [{ planItemId: "i1" }, { planItemId: "i2" }] } }),
   });
 
   assert.deepEqual(result.output.results.map((item) => item.tenant), ["goodday", "mozhouse"]);
   assert.deepEqual(result.output.results.map((item) => item.hotelId), ["5720", "5816"]);
+  assert.deepEqual(result.output.results.map((item) => item.uniquePlanCount), [1, 1]);
+  assert.deepEqual(result.output.results.map((item) => item.uniquePlanItemCount), [2, 2]);
   assert.ok(fs.existsSync(result.outputPath));
 });
 
@@ -567,6 +702,7 @@ test("build uniquePlans from normalized items", () => {
     zeroInventoryItemCount: 0,
     unknownInventoryItemCount: 0,
     minLosValues: [1],
+    children: [],
   });
 });
 
