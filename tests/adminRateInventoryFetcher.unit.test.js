@@ -393,3 +393,207 @@ test("controlled stop payload is safe", () => {
   assert.equal(snapshot.summary.unknownInventoryItemCount, 0);
   assert.doesNotThrow(() => auditSanitizedAdminRateInventorySnapshot(snapshot));
 });
+
+const { loadAdminRateFetcherConfig, validateAdminRateFetcherConfig } = require("../lib/adminRateInventoryFetcher/loadAdminRateFetcherConfig");
+const { runAdminRateInventoryBatchDryRun } = require("../lib/adminRateInventoryFetcher/runAdminRateInventoryBatchDryRun");
+const { buildUniquePlans } = require("../lib/adminRateInventoryFetcher/summarizeAdminRateInventoryUniquePlans");
+
+function writeTenantConfig(tenants) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-tenants-"));
+  const configPath = path.join(tmpDir, "tenants.json");
+  fs.writeFileSync(configPath, JSON.stringify(tenants, null, 2), "utf8");
+  return { tmpDir, configPath };
+}
+
+function configEnv(configPath, overrides = {}) {
+  return {
+    ADMIN_RATE_FETCHER_ENABLED: "1",
+    ADMIN_RATE_FETCHER_CONFIG_PATH: configPath,
+    ADMIN_RATE_FETCHER_TENANT: "mozhouse",
+    ADMIN_RATE_FETCHER_INCLUDE_DISABLED: "true",
+    ADMIN_RATE_FETCHER_DAYS: "120",
+    ADMIN_RATE_FETCHER_MAX_DAYS: "120",
+    ADMIN_RATE_FETCHER_TODAY: "2026-06-02",
+    ADMIN_RATE_FETCHER_OUT_DIR: path.dirname(configPath),
+    ...overrides,
+  };
+}
+
+const sampleTenants = {
+  goodday: { enabled: true, tenant: "goodday", hotelId: "5720", displayName: "良辰吉日", days: 120, currency: "TWD" },
+  mozhouse: { enabled: false, tenant: "mozhouse", hotelId: "5816", displayName: "木子寓所", days: 120, currency: "TWD" },
+  lunarhaven: { enabled: false, tenant: "lunarhaven", hotelId: "6721", displayName: "泊月民宿", days: 120, currency: "TWD" },
+};
+
+test("loads tenant from rateInventoryTenants config", () => {
+  const { configPath } = writeTenantConfig(sampleTenants);
+  const config = loadAdminRateFetcherConfig(configEnv(configPath));
+
+  assert.equal(config.tenant, "mozhouse");
+  assert.equal(config.tenantKey, "mozhouse");
+  assert.equal(config.hotelId, "5816");
+  assert.equal(config.displayName, "木子寓所");
+  assert.equal(config.currency, "TWD");
+});
+
+test("single tenant uses config hotelId", async () => {
+  const { configPath, tmpDir } = writeTenantConfig(sampleTenants);
+  const result = await runAdminRateInventoryFetcherDryRun({ chromium: {}, env: configEnv(configPath, { ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }) });
+
+  assert.equal(result.stoppedReason, "missing_credentials");
+  assert.equal(result.output.hotelId, "5816");
+  assert.equal(path.basename(result.outputPath), "admin_rate_inventory_fetcher_dryrun_mozhouse_5816_2026-06-02_2026-09-29.json");
+});
+
+test("disabled tenant rejected when includeDisabled=false", async () => {
+  const { configPath } = writeTenantConfig(sampleTenants);
+  const result = await runAdminRateInventoryFetcherDryRun({ chromium: {}, env: configEnv(configPath, { ADMIN_RATE_FETCHER_INCLUDE_DISABLED: "false" }) });
+
+  assert.equal(result.stoppedReason, "invalid_config");
+  assert.match(JSON.stringify(result.output.warnings), /tenant disabled/);
+});
+
+test("disabled tenant allowed when includeDisabled=true", () => {
+  const { configPath } = writeTenantConfig(sampleTenants);
+  const config = loadAdminRateFetcherConfig(configEnv(configPath, { ADMIN_RATE_FETCHER_INCLUDE_DISABLED: "true" }));
+
+  assert.deepEqual(validateAdminRateFetcherConfig(config), []);
+  assert.equal(config.hotelId, "5816");
+});
+
+test("days=120 passes maxDays=120", () => {
+  const { configPath } = writeTenantConfig(sampleTenants);
+  const config = loadAdminRateFetcherConfig(configEnv(configPath, { ADMIN_RATE_FETCHER_DAYS: "120", ADMIN_RATE_FETCHER_MAX_DAYS: "120" }));
+
+  assert.equal(config.days, 120);
+  assert.equal(config.maxDays, 120);
+  assert.equal(config.start, "2026-06-02");
+  assert.equal(config.end, "2026-09-29");
+  assert.doesNotThrow(() => buildCalendarsApiRequest({ origin: config.origin, hotelId: config.hotelId, start: config.start, end: config.end, lang: config.lang, maxDays: config.maxDays }));
+});
+
+test("missing tenant returns invalid_config", async () => {
+  const { configPath } = writeTenantConfig(sampleTenants);
+  const result = await runAdminRateInventoryFetcherDryRun({ chromium: {}, env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "missing" }) });
+
+  assert.equal(result.stoppedReason, "invalid_config");
+  assert.match(JSON.stringify(result.output.warnings), /not found/);
+});
+
+test("ALL mode respects maxTenantsPerRun", async () => {
+  const { configPath, tmpDir } = writeTenantConfig(sampleTenants);
+  const called = [];
+  const result = await runAdminRateInventoryBatchDryRun({
+    chromium: {},
+    env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "ALL", ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: "2", ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "0", ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }),
+    dryRunRunner: async ({ env }) => {
+      called.push(env.ADMIN_RATE_FETCHER_TENANT);
+      return { stoppedReason: "completed", outputPath: `out/${env.ADMIN_RATE_FETCHER_TENANT}.json`, output: { ok: true, summary: { itemCount: 1 } } };
+    },
+  });
+
+  assert.deepEqual(called, ["goodday", "mozhouse"]);
+  assert.equal(result.output.tenantCount, 2);
+  assert.equal(result.exitCode, 0);
+});
+
+test("tenant=ALL with maxTenantsPerRun=1 only runs first eligible tenant", async () => {
+  const { configPath, tmpDir } = writeTenantConfig(sampleTenants);
+  const called = [];
+  await runAdminRateInventoryBatchDryRun({
+    chromium: {},
+    env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "ALL", ADMIN_RATE_FETCHER_INCLUDE_DISABLED: "true", ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: "1", ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "0", ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }),
+    dryRunRunner: async ({ env }) => {
+      called.push(env.ADMIN_RATE_FETCHER_TENANT);
+      return { stoppedReason: "completed", outputPath: "out/goodday.json", output: { ok: true, summary: {} } };
+    },
+  });
+
+  assert.deepEqual(called, ["goodday"]);
+});
+
+test("ALL mode sequentially aggregates batch summary", async () => {
+  const { configPath, tmpDir } = writeTenantConfig(sampleTenants);
+  let active = 0;
+  let maxActive = 0;
+  const result = await runAdminRateInventoryBatchDryRun({
+    chromium: {},
+    env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "ALL", ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: "3", ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "0", ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }),
+    dryRunRunner: async ({ env }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return { stoppedReason: env.ADMIN_RATE_FETCHER_TENANT === "lunarhaven" ? "remote_403" : "completed", outputPath: `out/${env.ADMIN_RATE_FETCHER_TENANT}.json`, output: { ok: env.ADMIN_RATE_FETCHER_TENANT !== "lunarhaven", stoppedReason: env.ADMIN_RATE_FETCHER_TENANT === "lunarhaven" ? "remote_403" : undefined, summary: { itemCount: 1 } } };
+    },
+  });
+
+  assert.equal(maxActive, 1);
+  assert.equal(result.output.mode, "ALL");
+  assert.equal(result.output.tenantCount, 3);
+  assert.equal(result.output.ok, false);
+  assert.equal(result.exitCode, 0);
+});
+
+test("ALL mode produces per-tenant results", async () => {
+  const { configPath, tmpDir } = writeTenantConfig(sampleTenants);
+  const result = await runAdminRateInventoryBatchDryRun({
+    chromium: {},
+    env: configEnv(configPath, { ADMIN_RATE_FETCHER_TENANT: "ALL", ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: "2", ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "0", ADMIN_RATE_FETCHER_OUT_DIR: tmpDir }),
+    dryRunRunner: async ({ env }) => ({ stoppedReason: "completed", outputPath: `out/${env.ADMIN_RATE_FETCHER_TENANT}.json`, output: { ok: true, summary: { dateCount: 120 } } }),
+  });
+
+  assert.deepEqual(result.output.results.map((item) => item.tenant), ["goodday", "mozhouse"]);
+  assert.deepEqual(result.output.results.map((item) => item.hotelId), ["5720", "5816"]);
+  assert.ok(fs.existsSync(result.outputPath));
+});
+
+test("build uniquePlans from normalized items", () => {
+  const uniquePlans = buildUniquePlans([
+    { salesUnitId: "26669", salesUnitName: "獨享包棟私墅", planId: "42166", planName: "獨享包棟", date: "2026-06-02", price: 22000, inventory: 1, available: true, currency: "TWD", minLos: 1 },
+  ]);
+
+  assert.equal(uniquePlans.length, 1);
+  assert.deepEqual(uniquePlans[0], {
+    salesUnitId: "26669",
+    salesUnitName: "獨享包棟私墅",
+    planId: "42166",
+    planName: "獨享包棟",
+    currency: "TWD",
+    minPrice: 22000,
+    maxPrice: 22000,
+    dateCount: 1,
+    availableItemCount: 1,
+    zeroInventoryItemCount: 0,
+    unknownInventoryItemCount: 0,
+    minLosValues: [1],
+  });
+});
+
+test("uniquePlans aggregates minPrice/maxPrice/dateCount/available counts", () => {
+  const uniquePlans = buildUniquePlans([
+    { salesUnitId: "26669", salesUnitName: "A", planId: "42166", planName: "P", date: "2026-06-02", price: 24000, inventory: 1, available: true, currency: "TWD", minLos: 1 },
+    { salesUnitId: "26669", salesUnitName: "A", planId: "42166", planName: "P", date: "2026-06-03", price: 22000, inventory: 0, available: false, currency: "TWD", minLos: 2 },
+    { salesUnitId: "26669", salesUnitName: "A", planId: "42166", planName: "P", date: "2026-06-04", price: 26000, inventory: null, available: null, currency: "TWD", minLos: 1 },
+  ]);
+
+  assert.equal(uniquePlans[0].minPrice, 22000);
+  assert.equal(uniquePlans[0].maxPrice, 26000);
+  assert.equal(uniquePlans[0].dateCount, 3);
+  assert.equal(uniquePlans[0].availableItemCount, 1);
+  assert.equal(uniquePlans[0].zeroInventoryItemCount, 1);
+  assert.equal(uniquePlans[0].unknownInventoryItemCount, 1);
+  assert.deepEqual(uniquePlans[0].minLosValues, [1, 2]);
+});
+
+test("workflow static: admin-rate-inventory-fetcher-dryrun.yml has required safe inputs and no schedule/publish side effects", () => {
+  const workflow = fs.readFileSync(path.join(__dirname, "..", ".github", "workflows", "admin-rate-inventory-fetcher-dryrun.yml"), "utf8");
+
+  assert.equal(/\bschedule\s*:/.test(workflow), false);
+  assert.match(workflow, /Tenant key or ALL/);
+  assert.match(workflow, /include_disabled:/);
+  assert.match(workflow, /max_tenants_per_run:/);
+  assert.match(workflow, /days:[\s\S]*default: "120"/);
+  assert.equal(/ODIN_SHEET_/i.test(workflow), false);
+  assert.equal(/odin-data/i.test(workflow), false);
+});

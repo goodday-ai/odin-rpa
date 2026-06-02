@@ -1,30 +1,31 @@
-# 功能：手動執行 Admin Rate Inventory Fetcher Dry Run，直接呼叫 Owlting calendars range API 並上傳 sanitized snapshot。
-# 責任：僅支援 workflow_dispatch，登入單一 tenant/hotelId、單次 fetch 指定日期區間、稽核輸出後上傳短期 artifact。
+# 功能：手動執行 Admin Rate Inventory Fetcher Dry Run，從 rateInventoryTenants config 帶入 tenant/hotelId 後呼叫 Owlting calendars range API 並上傳 sanitized snapshot。
+# 責任：僅支援 workflow_dispatch，支援單一 tenant 或 ALL sequential 多品牌 dry-run 盤點；只產出 artifact，不 publish latest、不推資料分支、不寫 Google Sheet、不接 schedule。
 # 關聯模組：scripts/adminRateInventoryFetcherDryRun.js、lib/adminRateInventoryFetcher/*、tests/adminRateInventoryFetcher.unit.test.js。
-# 關鍵流程：checkout → npm ci → install chromium → unit test → dry-run fetcher → sanitized artifact audit → upload JSON artifact。
+# 關鍵流程：checkout → npm ci → install chromium → unit test → config-driven dry-run fetcher → sanitized artifact audit → upload JSON artifact。
 name: Admin Rate Inventory Fetcher Dry Run
 
 on:
   workflow_dispatch:
     inputs:
       tenant:
-        description: "Tenant key"
+        description: "Tenant key or ALL"
         required: true
-        default: "goodday"
-      hotel_id:
-        description: "Owlting admin hotelId"
+        default: "mozhouse"
+      include_disabled:
+        description: "Allow dry-run for disabled tenants in config"
         required: true
-        default: "5720"
-      start:
-        description: "Range start date YYYY-MM-DD"
-        required: true
-        default: "2026-06-01"
-      end:
-        description: "Range end date YYYY-MM-DD"
-        required: true
-        default: "2026-08-31"
+        type: boolean
+        default: true
+      max_tenants_per_run:
+        description: "Max tenants for ALL mode"
+        required: false
+        default: "1"
+      days:
+        description: "Days to fetch"
+        required: false
+        default: "120"
       timeout_ms:
-        description: "Dry-run timeout in ms"
+        description: "Fetch timeout in ms"
         required: false
         default: "15000"
 
@@ -32,19 +33,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.hotel_id }}
+  group: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.max_tenants_per_run }}
   cancel-in-progress: true
 
 jobs:
   dryrun:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       ADMIN_RATE_FETCHER_ENABLED: "1"
+      ADMIN_RATE_FETCHER_CONFIG_PATH: "config/rateInventoryTenants.json"
       ADMIN_RATE_FETCHER_TENANT: ${{ inputs.tenant }}
-      ADMIN_RATE_FETCHER_HOTEL_ID: ${{ inputs.hotel_id }}
-      ADMIN_RATE_FETCHER_START: ${{ inputs.start }}
-      ADMIN_RATE_FETCHER_END: ${{ inputs.end }}
+      ADMIN_RATE_FETCHER_INCLUDE_DISABLED: ${{ inputs.include_disabled }}
+      ADMIN_RATE_FETCHER_MAX_TENANTS_PER_RUN: ${{ inputs.max_tenants_per_run }}
+      ADMIN_RATE_FETCHER_DAYS: ${{ inputs.days }}
+      ADMIN_RATE_FETCHER_MAX_DAYS: "120"
+      ADMIN_RATE_FETCHER_BATCH_DELAY_MS: "1500"
+      ADMIN_RATE_FETCHER_CONTINUE_ON_CONTROLLED_STOP: "true"
       ADMIN_RATE_FETCHER_LANG: "zh_TW"
       ADMIN_RATE_FETCHER_OUT_DIR: "out"
       ADMIN_RATE_FETCHER_TIMEOUT_MS: ${{ inputs.timeout_ms }}
@@ -86,7 +91,7 @@ jobs:
       - name: Upload Admin Rate Inventory Fetcher artifact
         uses: actions/upload-artifact@v6
         with:
-          name: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.hotel_id }}-${{ inputs.start }}-${{ inputs.end }}
+          name: admin-rate-inventory-fetcher-dryrun-${{ inputs.tenant }}-${{ inputs.days }}d
           path: out/admin_rate_inventory_fetcher_dryrun_*.json
           if-no-files-found: error
           retention-days: 3
