@@ -844,5 +844,23 @@
     "roomType": "2F｜3F｜4F",
     "phone": "0983013719",
     "updatedAt": "2026-06-02"
+  },
+  "OBE04650640526060201": {
+    "projectName": "OTA售價",
+    "roomType": "5F",
+    "phone": "0909542310",
+    "updatedAt": "2026-06-02"
+  },
+  "OBE82890640526060202": {
+    "projectName": "限量優惠專案(連住)",
+    "roomType": "4F",
+    "phone": "0972705698",
+    "updatedAt": "2026-06-02"
+  },
+  "OBE15190640526060203": {
+    "projectName": "限量優惠專案(連住)",
+    "roomType": "3F",
+    "phone": "0955939058",
+    "updatedAt": "2026-06-02"
   }
 }
