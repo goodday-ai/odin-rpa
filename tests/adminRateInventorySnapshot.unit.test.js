@@ -19,8 +19,9 @@ const {
   loadRateInventorySnapshotConfig,
   validateRateInventorySnapshotConfig,
 } = require("../lib/adminRateInventorySnapshot/loadRateInventorySnapshotConfig");
-const { publishRateInventorySnapshot, latestSnapshotPath } = require("../lib/adminRateInventorySnapshot/publishRateInventorySnapshot");
+const { publishRateInventorySnapshot, latestSnapshotPath, publishCandidatePath } = require("../lib/adminRateInventorySnapshot/publishRateInventorySnapshot");
 const { buildSnapshotCalendarsRequest } = require("../lib/adminRateInventorySnapshot/runRateInventorySnapshotSync");
+const { runRateInventorySnapshotBatchSync } = require("../lib/adminRateInventorySnapshot/runRateInventorySnapshotBatchSync");
 const { validateRateInventorySnapshotForPublish } = require("../lib/adminRateInventorySnapshot/validateRateInventorySnapshot");
 
 function baseEnv(extra = {}) {
@@ -232,14 +233,17 @@ test("rejects stale / invalid range", () => {
   assert.match(errors.join("\n"), /rangeStart\/rangeEnd must match current sync window/);
 });
 
-test("publishes valid snapshot to latest path", async () => {
+test("publishes valid snapshot to safe candidate path", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-publish-"));
-  const config = sampleConfig({ RATE_INVENTORY_LATEST_DIR: tmpDir });
+  const latestDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-latest-"));
+  const config = sampleConfig({ RATE_INVENTORY_LATEST_DIR: latestDir, RATE_INVENTORY_PUBLISH_CANDIDATE_DIR: tmpDir });
   const snapshot = sampleSnapshot(config);
   const result = await publishRateInventorySnapshot(snapshot, config);
   assert.equal(result.published, true);
-  assert.equal(result.latestPath, path.join(tmpDir, "rate_inventory_goodday.json"));
-  const written = JSON.parse(fs.readFileSync(result.latestPath, "utf8"));
+  assert.equal(result.latestPath, path.join(latestDir, "rate_inventory_goodday.json"));
+  assert.equal(result.candidatePath, path.join(tmpDir, "rate_inventory_goodday.json"));
+  assert.equal(fs.existsSync(result.latestPath), false);
+  const written = JSON.parse(fs.readFileSync(result.candidatePath, "utf8"));
   assert.equal(written.tenant, "goodday");
   assert.equal(written.summary.truncated, false);
   assert.deepEqual([...new Set(written.items.map((item) => item.salesUnitId))], ["26669"]);
@@ -333,4 +337,155 @@ test("stops before login when tenant is not allowlisted", () => {
     () => loadEnabledTenantConfig(baseEnv({ RATE_INVENTORY_TENANT: "other", RATE_INVENTORY_TENANT_ALLOWLIST: "goodday" })),
     /tenant_not_allowed/,
   );
+});
+
+test("loads ALL tenant mode and respects eligibility filters", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-all-config-"));
+  const configPath = path.join(tmpDir, "tenants.json");
+  fs.writeFileSync(configPath, JSON.stringify({
+    goodday: { enabled: true, tenant: "goodday", hotelId: "5720", days: 120, publishPlanIdAllowlist: ["42166"], publishSalesUnitIdAllowlist: ["26669"] },
+    disabled: { enabled: false, tenant: "disabled", hotelId: "1", days: 120, publishPlanIdAllowlist: ["p"], publishSalesUnitIdAllowlist: ["s"] },
+    missingPlans: { enabled: true, tenant: "missingPlans", hotelId: "2", days: 120, publishPlanIdAllowlist: [], publishSalesUnitIdAllowlist: ["s"] },
+    missingSalesUnits: { enabled: true, tenant: "missingSalesUnits", hotelId: "3", days: 120, publishPlanIdAllowlist: ["p"], publishSalesUnitIdAllowlist: [] },
+    mozhouse: { enabled: true, tenant: "mozhouse", hotelId: "5816", days: 120, publishPlanIdAllowlist: ["29021"], publishSalesUnitIdAllowlist: ["27443"] },
+  }), "utf8");
+
+  const config = loadRateInventorySnapshotConfig(baseEnv({
+    RATE_INVENTORY_CONFIG_PATH: configPath,
+    RATE_INVENTORY_TENANT: "ALL",
+    RATE_INVENTORY_TENANT_ALLOWLIST: "goodday,mozhouse,missingPlans,missingSalesUnits,disabled",
+    RATE_INVENTORY_MAX_TENANTS_PER_RUN: "8",
+    RATE_INVENTORY_BATCH_DELAY_MS: "123",
+    RATE_INVENTORY_CONTINUE_ON_CONTROLLED_STOP: "true",
+  }));
+
+  assert.equal(config.mode, "ALL");
+  assert.equal(config.batchDelayMs, 123);
+  assert.equal(config.continueOnControlledStop, true);
+  assert.deepEqual(config.tenants.map((tenant) => tenant.tenant), ["goodday", "mozhouse"]);
+});
+
+test("ALL mode respects RATE_INVENTORY_TENANT_ALLOWLIST and maxTenantsPerRun", () => {
+  const config = loadRateInventorySnapshotConfig(baseEnv({
+    RATE_INVENTORY_TENANT: "ALL",
+    RATE_INVENTORY_TENANT_ALLOWLIST: "mozhouse,houseapt,triplesuite",
+    RATE_INVENTORY_MAX_TENANTS_PER_RUN: "2",
+  }));
+
+  assert.deepEqual(config.tenants.map((tenant) => tenant.tenant), ["mozhouse", "houseapt"]);
+  assert.equal(config.tenantCount, 2);
+});
+
+test("ALL mode returns no_enabled_tenants when no eligible tenant remains", () => {
+  const config = loadRateInventorySnapshotConfig(baseEnv({
+    RATE_INVENTORY_TENANT: "ALL",
+    RATE_INVENTORY_TENANT_ALLOWLIST: "not-in-config",
+    RATE_INVENTORY_MAX_TENANTS_PER_RUN: "8",
+  }));
+
+  assert.equal(config.tenantCount, 0);
+  assert.equal(config.stoppedReason, "no_enabled_tenants");
+});
+
+test("batch runner executes tenants sequentially and writes per-tenant result summary", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-batch-"));
+  const calls = [];
+  const result = await runRateInventorySnapshotBatchSync({
+    chromium: {},
+    env: baseEnv({
+      RATE_INVENTORY_TENANT: "ALL",
+      RATE_INVENTORY_TENANT_ALLOWLIST: "goodday,mozhouse",
+      RATE_INVENTORY_MAX_TENANTS_PER_RUN: "2",
+      RATE_INVENTORY_OUT_DIR: tmpDir,
+      RATE_INVENTORY_BATCH_DELAY_MS: "5",
+      RATE_INVENTORY_CONTINUE_ON_CONTROLLED_STOP: "true",
+    }),
+    sleep: async (ms) => calls.push(`delay:${ms}`),
+    runner: async ({ config }) => {
+      calls.push(config.tenant);
+      return { ok: true, published: false, stoppedReason: "publish_disabled", outputPath: path.join(tmpDir, `${config.tenant}.json`), summary: { itemCount: 1, truncated: false }, tenant: config.tenant, hotelId: config.hotelId, displayName: config.displayName };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ["goodday", "delay:5", "mozhouse"]);
+  assert.equal(result.summary.results.length, 2);
+  assert.equal(result.summary.results[0].tenant, "goodday");
+  assert.equal(fs.existsSync(result.outputPath), true);
+});
+
+test("controlled stop continues when continueOnControlledStop=true", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-controlled-"));
+  const calls = [];
+  const result = await runRateInventorySnapshotBatchSync({
+    chromium: {},
+    env: baseEnv({
+      RATE_INVENTORY_TENANT: "ALL",
+      RATE_INVENTORY_TENANT_ALLOWLIST: "goodday,mozhouse",
+      RATE_INVENTORY_MAX_TENANTS_PER_RUN: "2",
+      RATE_INVENTORY_OUT_DIR: tmpDir,
+      RATE_INVENTORY_BATCH_DELAY_MS: "0",
+      RATE_INVENTORY_CONTINUE_ON_CONTROLLED_STOP: "true",
+    }),
+    sleep: async () => {},
+    runner: async ({ config }) => {
+      calls.push(config.tenant);
+      return config.tenant === "goodday"
+        ? { ok: false, published: false, stoppedReason: "remote_429", outputPath: path.join(tmpDir, "goodday.json"), summary: {} }
+        : { ok: true, published: false, stoppedReason: "publish_disabled", outputPath: path.join(tmpDir, "mozhouse.json"), summary: { itemCount: 1, truncated: false } };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ["goodday", "mozhouse"]);
+  assert.equal(result.summary.results[0].stoppedReason, "remote_429");
+});
+
+test("fatal error stops batch", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-fatal-"));
+  const calls = [];
+  const result = await runRateInventorySnapshotBatchSync({
+    chromium: {},
+    env: baseEnv({
+      RATE_INVENTORY_TENANT: "ALL",
+      RATE_INVENTORY_TENANT_ALLOWLIST: "goodday,mozhouse",
+      RATE_INVENTORY_MAX_TENANTS_PER_RUN: "2",
+      RATE_INVENTORY_OUT_DIR: tmpDir,
+      RATE_INVENTORY_BATCH_DELAY_MS: "0",
+      RATE_INVENTORY_CONTINUE_ON_CONTROLLED_STOP: "true",
+    }),
+    sleep: async () => {},
+    runner: async ({ config }) => {
+      calls.push(config.tenant);
+      return { ok: false, published: false, stoppedReason: "missing_credentials", outputPath: path.join(tmpDir, `${config.tenant}.json`), summary: {} };
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.stoppedReason, "missing_credentials");
+  assert.deepEqual(calls, ["goodday"]);
+});
+
+test("publish=false does not write publish candidates", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-no-publish-"));
+  const config = sampleConfig({ RATE_INVENTORY_PUBLISH_ENABLED: "false", RATE_INVENTORY_PUBLISH_CANDIDATE_DIR: tmpDir });
+  const result = await publishRateInventorySnapshot(sampleSnapshot(config), config);
+  assert.equal(result.published, false);
+  assert.equal(result.skippedReason, "publish_disabled");
+  assert.equal(fs.existsSync(publishCandidatePath(config)), false);
+});
+
+test("publish=true writes candidates for valid snapshots only", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-valid-candidate-"));
+  const config = sampleConfig({ RATE_INVENTORY_PUBLISH_ENABLED: "true", RATE_INVENTORY_PUBLISH_CANDIDATE_DIR: tmpDir });
+  await publishRateInventorySnapshot(sampleSnapshot(config), config);
+  assert.equal(fs.existsSync(publishCandidatePath(config)), true);
+});
+
+test("invalid or truncated tenant does not produce publish candidate", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-invalid-candidate-"));
+  const config = sampleConfig({ RATE_INVENTORY_PUBLISH_ENABLED: "true", RATE_INVENTORY_PUBLISH_CANDIDATE_DIR: tmpDir });
+  const invalidSnapshot = { ...sampleSnapshot(config, { ...sampleNormalized(), truncated: true }), ok: false };
+  await assert.rejects(() => publishRateInventorySnapshot(invalidSnapshot, config), /not publishable/);
+  assert.equal(fs.existsSync(publishCandidatePath(config)), false);
 });
