@@ -19,7 +19,7 @@ on:
       days:
         description: "Days to fetch"
         required: false
-        default: "92"
+        default: "120"
       timeout_ms:
         description: "Fetch timeout in ms"
         required: false
@@ -74,8 +74,8 @@ jobs:
           RATE_INVENTORY_TENANT: ${{ inputs.tenant }}
           RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json"
           RATE_INVENTORY_DAYS: ${{ inputs.days }}
-          RATE_INVENTORY_MAX_DAYS: "92"
-          RATE_INVENTORY_MAX_ITEMS: "5000"
+          RATE_INVENTORY_MAX_DAYS: "120"
+          RATE_INVENTORY_MAX_ITEMS: "8000"
           RATE_INVENTORY_OUT_DIR: "out"
           RATE_INVENTORY_LANG: "zh_TW"
           RATE_INVENTORY_TIMEOUT_MS: ${{ inputs.timeout_ms }}
@@ -115,8 +115,8 @@ jobs:
           RATE_INVENTORY_TENANT: ${{ inputs.tenant }}
           RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json"
           RATE_INVENTORY_DAYS: ${{ inputs.days }}
-          RATE_INVENTORY_MAX_DAYS: "92"
-          RATE_INVENTORY_MAX_ITEMS: "5000"
+          RATE_INVENTORY_MAX_DAYS: "120"
+          RATE_INVENTORY_MAX_ITEMS: "8000"
           RATE_INVENTORY_OUT_DIR: "out"
           RATE_INVENTORY_LANG: "zh_TW"
           RATE_INVENTORY_TIMEOUT_MS: ${{ inputs.timeout_ms }}
