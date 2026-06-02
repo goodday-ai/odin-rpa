@@ -1,14 +1,14 @@
-# 功能：手動驗證 Admin Rate Inventory Snapshot Sync v1，產出 LINE-readable goodday 價格庫存 snapshot artifact。
-# 責任：僅支援 workflow_dispatch，不新增 schedule；先 dry publish=false 產 artifact，再由人工確認後 publish=true 覆蓋 odin-data latest。
+# 功能：手動驗證 Admin Rate Inventory Snapshot Sync v1，產出 LINE-readable 單品牌或 tenant=ALL 多品牌價格庫存 snapshot artifact。
+# 責任：僅支援 workflow_dispatch，不新增 schedule；publish=false 只產 artifact，publish=true 只將 runtime 驗證過的候選檔一次 commit/push 到 odin-data latest。
 # 關聯模組：scripts/adminRateInventorySnapshotSync.js、lib/adminRateInventorySnapshot/*、lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot.js。
-# 關鍵流程：checkout → npm ci → install chromium → unit/static tests → snapshot sync → sanitizer audit → optional odin-data publish → upload artifact。
+# 關鍵流程：checkout → npm ci → install chromium → unit/static tests → snapshot sync → sanitizer audit → optional batch publish → upload artifact。
 name: Rate Inventory Snapshot Sync
 
 on:
   workflow_dispatch:
     inputs:
       tenant:
-        description: "Tenant key"
+        description: "Tenant key or ALL"
         required: true
         default: "goodday"
       publish_enabled:
@@ -24,6 +24,10 @@ on:
         description: "Fetch timeout in ms"
         required: false
         default: "15000"
+      max_tenants_per_run:
+        description: "Max tenants for ALL mode"
+        required: false
+        default: "1"
       today:
         description: "Optional fixed today YYYY-MM-DD for testing. Leave empty in normal use."
         required: false
@@ -82,8 +86,10 @@ jobs:
           RATE_INVENTORY_PUBLISH_ENABLED: ${{ inputs.publish_enabled }}
           RATE_INVENTORY_DATA_BRANCH: "odin-data"
           RATE_INVENTORY_LATEST_DIR: "data/odin/rate_inventory/latest"
-          RATE_INVENTORY_TENANT_ALLOWLIST: "goodday"
-          RATE_INVENTORY_MAX_TENANTS_PER_RUN: "1"
+          RATE_INVENTORY_TENANT_ALLOWLIST: "goodday,mozhouse,houseapt,houseresidence,lunarhaven,nightph,sunmoon,triplesuite"
+          RATE_INVENTORY_MAX_TENANTS_PER_RUN: ${{ inputs.max_tenants_per_run }}
+          RATE_INVENTORY_BATCH_DELAY_MS: "1500"
+          RATE_INVENTORY_CONTINUE_ON_CONTROLLED_STOP: "true"
           ODIN_EMAIL: ${{ secrets.ODIN_EMAIL }}
           ODIN_PASSWORD: ${{ secrets.ODIN_PASSWORD }}
         run: |
@@ -111,47 +117,33 @@ jobs:
       - name: Publish latest snapshot to odin-data branch
         if: ${{ success() && inputs.publish_enabled }}
         env:
-          RATE_INVENTORY_SYNC_ENABLED: "1"
-          RATE_INVENTORY_TENANT: ${{ inputs.tenant }}
-          RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json"
-          RATE_INVENTORY_DAYS: ${{ inputs.days }}
-          RATE_INVENTORY_MAX_DAYS: "120"
-          RATE_INVENTORY_MAX_ITEMS: "8000"
-          RATE_INVENTORY_OUT_DIR: "out"
-          RATE_INVENTORY_LANG: "zh_TW"
-          RATE_INVENTORY_TIMEOUT_MS: ${{ inputs.timeout_ms }}
-          RATE_INVENTORY_PUBLISH_ENABLED: ${{ inputs.publish_enabled }}
           RATE_INVENTORY_DATA_BRANCH: "odin-data"
           RATE_INVENTORY_LATEST_DIR: "data/odin/rate_inventory/latest"
-          RATE_INVENTORY_TENANT_ALLOWLIST: "goodday"
-          RATE_INVENTORY_MAX_TENANTS_PER_RUN: "1"
         run: |
-          if [ -n "${{ inputs.today }}" ]; then
-            export RATE_INVENTORY_TODAY="${{ inputs.today }}"
+          if ! compgen -G "/tmp/rate-inventory-publish/rate_inventory_*.json" > /dev/null; then
+            echo "No validated rate inventory publish candidates found."
+            exit 0
           fi
 
           node - <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');
-          const { sanitizeAdminRateInventorySnapshot, auditSanitizedAdminRateInventorySnapshot } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
-          const { loadEnabledTenantConfig } = require('./lib/adminRateInventorySnapshot/loadRateInventorySnapshotConfig');
-          const { assertRateInventorySnapshotPublishable } = require('./lib/adminRateInventorySnapshot/validateRateInventorySnapshot');
+          const { auditSanitizedAdminRateInventorySnapshot } = require('./lib/adminRateInventoryFetcher/sanitizeAdminRateInventorySnapshot');
 
-          const config = loadEnabledTenantConfig(process.env);
-          const files = fs.readdirSync(config.outDir)
-            .filter((file) => /^rate_inventory_snapshot_sync_.*\.json$/.test(file))
-            .map((file) => path.join(config.outDir, file))
-            .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-          if (files.length === 0) throw new Error('No rate inventory snapshot sync artifact found');
-
-          const snapshot = sanitizeAdminRateInventorySnapshot(JSON.parse(fs.readFileSync(files[0], 'utf8')));
-          auditSanitizedAdminRateInventorySnapshot(snapshot);
-          assertRateInventorySnapshotPublishable(snapshot, config);
-          if (snapshot.published !== true) throw new Error('Snapshot artifact was not marked published by sync runtime');
-
-          fs.mkdirSync('/tmp/rate-inventory-publish', { recursive: true });
-          fs.writeFileSync('/tmp/rate-inventory-publish/rate_inventory_goodday.json', `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-          console.log(`validated publish candidate from ${files[0]}`);
+          const publishDir = '/tmp/rate-inventory-publish';
+          const files = fs.readdirSync(publishDir)
+            .filter((file) => /^rate_inventory_[a-zA-Z0-9_-]+\.json$/.test(file))
+            .map((file) => path.join(publishDir, file))
+            .sort();
+          if (files.length === 0) throw new Error('No rate_inventory_*.json publish candidates found');
+          for (const file of files) {
+            const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+            auditSanitizedAdminRateInventorySnapshot(snapshot);
+            if (snapshot.ok !== true || snapshot.published !== true || !snapshot.tenant || snapshot.summary?.truncated !== false || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
+              throw new Error(`Invalid publish candidate: ${file}`);
+            }
+          }
+          console.log(`validated publish candidates: ${files.join(', ')}`);
           NODE
 
           git config user.name "github-actions[bot]"
@@ -160,13 +152,13 @@ jobs:
           rm -rf .rate_inventory_data_branch
           git worktree add -B "${RATE_INVENTORY_DATA_BRANCH}" .rate_inventory_data_branch "origin/${RATE_INVENTORY_DATA_BRANCH}"
           mkdir -p ".rate_inventory_data_branch/${RATE_INVENTORY_LATEST_DIR}"
-          cp /tmp/rate-inventory-publish/rate_inventory_goodday.json ".rate_inventory_data_branch/${RATE_INVENTORY_LATEST_DIR}/rate_inventory_goodday.json"
-          git -C .rate_inventory_data_branch add "${RATE_INVENTORY_LATEST_DIR}/rate_inventory_goodday.json"
+          cp /tmp/rate-inventory-publish/rate_inventory_*.json ".rate_inventory_data_branch/${RATE_INVENTORY_LATEST_DIR}/"
+          git -C .rate_inventory_data_branch add "${RATE_INVENTORY_LATEST_DIR}/rate_inventory_*.json"
           if git -C .rate_inventory_data_branch diff --cached --quiet; then
             echo "No latest snapshot changes to publish."
             exit 0
           fi
-          git -C .rate_inventory_data_branch commit -m "Update goodday rate inventory snapshot"
+          git -C .rate_inventory_data_branch commit -m "Update rate inventory snapshots"
           git -C .rate_inventory_data_branch push origin "HEAD:${RATE_INVENTORY_DATA_BRANCH}"
 
       - name: Upload Rate Inventory Snapshot artifact
@@ -176,6 +168,7 @@ jobs:
           name: rate-inventory-snapshot-${{ inputs.tenant }}-${{ github.run_id }}
           path: |
             out/rate_inventory_snapshot_sync_*.json
+            out/rate_inventory_snapshot_sync_batch_*.json
             !out/*raw*
             !out/*headers*
             !out/*trace*
