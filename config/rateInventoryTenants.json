@@ -4,10 +4,87 @@
     "tenant": "goodday",
     "hotelId": "5720",
     "displayName": "良辰吉日",
-    "days": 92,
+    "days": 120,
     "currency": "TWD",
     "publishPlanIdAllowlist": ["42144", "42145", "42166"],
     "publishSalesUnitIdAllowlist": ["26669"],
     "notes": "只 publish 官網對客可顯示專案；Booking / Booking 3F 暫不 publish"
+  },
+  "mozhouse": {
+    "enabled": false,
+    "tenant": "mozhouse",
+    "hotelId": "5816",
+    "displayName": "木子寓所",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "houseapt": {
+    "enabled": false,
+    "tenant": "houseapt",
+    "hotelId": "6405",
+    "displayName": "好思公寓",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "houseresidence": {
+    "enabled": false,
+    "tenant": "houseresidence",
+    "hotelId": "6723",
+    "displayName": "好思寓所",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "lunarhaven": {
+    "enabled": false,
+    "tenant": "lunarhaven",
+    "hotelId": "6721",
+    "displayName": "泊月民宿",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "nightph": {
+    "enabled": false,
+    "tenant": "nightph",
+    "hotelId": "6454",
+    "displayName": "伊莉莎白甜夜",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "sunmoon": {
+    "enabled": false,
+    "tenant": "sunmoon",
+    "hotelId": "6722",
+    "displayName": "桑沐民宿",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
+  },
+  "triplesuite": {
+    "enabled": false,
+    "tenant": "triplesuite",
+    "hotelId": "6323",
+    "displayName": "弎居胡同",
+    "days": 120,
+    "currency": "TWD",
+    "publishPlanIdAllowlist": [],
+    "publishSalesUnitIdAllowlist": [],
+    "notes": "先手動 probe / dry-run 確認 planId 後再填白名單；確認前不得 publish"
   }
 }

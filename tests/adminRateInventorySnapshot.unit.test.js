@@ -17,6 +17,7 @@ const { buildRateInventorySnapshot } = require("../lib/adminRateInventorySnapsho
 const {
   loadEnabledTenantConfig,
   loadRateInventorySnapshotConfig,
+  validateRateInventorySnapshotConfig,
 } = require("../lib/adminRateInventorySnapshot/loadRateInventorySnapshotConfig");
 const { publishRateInventorySnapshot, latestSnapshotPath } = require("../lib/adminRateInventorySnapshot/publishRateInventorySnapshot");
 const { validateRateInventorySnapshotForPublish } = require("../lib/adminRateInventorySnapshot/validateRateInventorySnapshot");
@@ -27,8 +28,8 @@ function baseEnv(extra = {}) {
     RATE_INVENTORY_TENANT: "goodday",
     RATE_INVENTORY_CONFIG_PATH: "config/rateInventoryTenants.json",
     RATE_INVENTORY_TODAY: "2026-06-01",
-    RATE_INVENTORY_DAYS: "92",
-    RATE_INVENTORY_MAX_DAYS: "92",
+    RATE_INVENTORY_DAYS: "120",
+    RATE_INVENTORY_MAX_DAYS: "120",
     RATE_INVENTORY_MAX_ITEMS: "5000",
     RATE_INVENTORY_OUT_DIR: "out",
     RATE_INVENTORY_LANG: "zh_TW",
@@ -71,9 +72,66 @@ test("loads goodday config", () => {
   assert.equal(config.hotelId, "5720");
   assert.equal(config.displayName, "良辰吉日");
   assert.equal(config.start, "2026-06-01");
-  assert.equal(config.end, "2026-08-31");
+  assert.equal(config.days, 120);
+  assert.equal(config.maxDays, 120);
+  assert.equal(config.end, "2026-09-28");
+  assert.deepEqual(validateRateInventorySnapshotConfig(config), []);
   assert.deepEqual(config.publishPlanIdAllowlist, ["42144", "42145", "42166"]);
   assert.deepEqual(config.publishSalesUnitIdAllowlist, ["26669"]);
+});
+
+test("accepts goodday 120-day sync window and maxDays", () => {
+  const config = sampleConfig({ RATE_INVENTORY_DAYS: "120", RATE_INVENTORY_MAX_DAYS: "120" });
+  assert.equal(config.days, 120);
+  assert.equal(config.maxDays, 120);
+  assert.equal(config.start, "2026-06-01");
+  assert.equal(config.end, "2026-09-28");
+});
+
+test("rejects tenant days greater than maxDays during config validation", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rate-inventory-max-days-"));
+  const configPath = path.join(tmpDir, "tenants.json");
+  // 中文註解：刻意不設定 RATE_INVENTORY_DAYS，讓 tenant.days 直接進入驗證，確保超過 maxDays 不會被默默允許。
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ goodday: { enabled: true, tenant: "goodday", hotelId: "5720", days: 121, publishPlanIdAllowlist: ["42166"], publishSalesUnitIdAllowlist: ["26669"] } }),
+    "utf8",
+  );
+  const config = loadRateInventorySnapshotConfig(baseEnv({ RATE_INVENTORY_CONFIG_PATH: configPath, RATE_INVENTORY_DAYS: "" }));
+  assert.equal(config.days, 121);
+  assert.match(validateRateInventorySnapshotConfig(config).join("\n"), /RATE_INVENTORY_DAYS must be <= RATE_INVENTORY_MAX_DAYS/);
+});
+
+test("multi-brand tenant inventory config keeps non-goodday disabled with empty allowlists", () => {
+  const tenants = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config", "rateInventoryTenants.json"), "utf8"));
+  const disabledTenants = ["mozhouse", "houseapt", "houseresidence", "lunarhaven", "nightph", "sunmoon", "triplesuite"];
+  assert.equal(tenants.goodday.enabled, true);
+  assert.equal(tenants.goodday.days, 120);
+  for (const tenantKey of disabledTenants) {
+    assert.equal(tenants[tenantKey].enabled, false, `${tenantKey} must remain disabled`);
+    assert.equal(tenants[tenantKey].days, 120, `${tenantKey} must keep 120-day inventory horizon`);
+    assert.deepEqual(tenants[tenantKey].publishPlanIdAllowlist, [], `${tenantKey} plan allowlist must stay empty`);
+    assert.deepEqual(tenants[tenantKey].publishSalesUnitIdAllowlist, [], `${tenantKey} sales-unit allowlist must stay empty`);
+  }
+});
+
+test("disabled tenant with empty allowlists loads as inventory config but is not syncable or publishable", () => {
+  const config = loadRateInventorySnapshotConfig(baseEnv({
+    RATE_INVENTORY_TENANT: "mozhouse",
+    RATE_INVENTORY_TENANT_ALLOWLIST: "mozhouse",
+    RATE_INVENTORY_PUBLISH_ENABLED: "1",
+  }));
+  assert.equal(config.tenant, "mozhouse");
+  assert.equal(config.days, 120);
+  assert.deepEqual(config.publishPlanIdAllowlist, []);
+  assert.deepEqual(config.publishSalesUnitIdAllowlist, []);
+  assert.throws(
+    () => loadEnabledTenantConfig(baseEnv({ RATE_INVENTORY_TENANT: "mozhouse", RATE_INVENTORY_TENANT_ALLOWLIST: "mozhouse" })),
+    /rate inventory tenant disabled: mozhouse/,
+  );
+  const snapshot = sampleSnapshot(config);
+  assert.equal(snapshot.items.length, 0);
+  assert.match(validateRateInventorySnapshotForPublish(snapshot, config).join("\n"), /items must not be empty|publishPlanIdAllowlist is required|publishSalesUnitIdAllowlist is required/);
 });
 
 test("rejects disabled tenant", () => {

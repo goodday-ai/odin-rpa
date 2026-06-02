@@ -29,6 +29,7 @@ test("rate inventory snapshot sync workflow declares required dispatch inputs", 
     assert.match(workflow, new RegExp(`\\n\\s{6}${input}:`));
   }
   assert.match(workflow, /publish_enabled:[\s\S]*?type: boolean[\s\S]*?default: false/);
+  assert.match(workflow, /days:[\s\S]*?default: "120"/);
 });
 
 test("rate inventory snapshot sync workflow uses Odin credentials and no Sheet secrets", () => {
@@ -38,7 +39,10 @@ test("rate inventory snapshot sync workflow uses Odin credentials and no Sheet s
   assert.doesNotMatch(workflow, /ODIN_SHEET_TOKEN/);
 });
 
-test("rate inventory snapshot sync workflow enforces goodday tenant allowlist", () => {
+test("rate inventory snapshot sync workflow enforces 120-day cap and goodday-only tenant allowlist", () => {
+  assert.match(workflow, /RATE_INVENTORY_DAYS:\s*\$\{\{ inputs\.days \}\}/);
+  assert.match(workflow, /RATE_INVENTORY_MAX_DAYS:\s*"120"/);
+  assert.match(workflow, /RATE_INVENTORY_MAX_ITEMS:\s*"8000"/);
   assert.match(workflow, /RATE_INVENTORY_TENANT_ALLOWLIST:\s*"goodday"/);
   assert.match(workflow, /RATE_INVENTORY_MAX_TENANTS_PER_RUN:\s*"1"/);
   assert.doesNotMatch(workflow, /ODIN_DATA_BRANCH/);
